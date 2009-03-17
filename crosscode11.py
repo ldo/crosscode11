@@ -18,7 +18,22 @@ class o(object) :
 
 #end o
 
-for reg in range(0, 8) :
+for \
+		name, reg \
+	in \
+		(
+			("R0", 0),
+			("R1", 1),
+			("R2", 2),
+			("R3", 3),
+			("R4", 4),
+			("R5", 5),
+			("R6", 6),
+			("SP", 6),
+			("R7", 7),
+			("PC", 7),
+		) \
+:
 	# names are
 	#     o.Rn -- register direct
 	#     o.aRn -- register deferred
@@ -28,15 +43,14 @@ for reg in range(0, 8) :
 	#     o.apRn -- register pre-decrement deferred
 	#     o.Rno -- register + offset
 	#     o.aRno -- register + offset deferred
-	regbase = "R%d" % reg
-	setattr(o, regbase, o(reg, False, False, False, False, reg))
-	setattr(o, "a" + regbase, o(reg, True, False, False, False, 010 | reg))
-	setattr(o, regbase + "i", o(reg, False, True, False, False, 020 | reg))
-	setattr(o, "a" + regbase + "i", o(reg, True, True, False, False, 030 | reg))
-	setattr(o, "p" + regbase, o(reg, False, False, True, False, 040 | reg))
-	setattr(o, "ap" + regbase, o(reg, True, False, True, False, 050 | reg))
-	setattr(o, regbase + "o", o(reg, False, False, False, True, 060 | reg))
-	setattr(o, "a" + regbase + "o", o(reg, True, False, False, True, 070 | reg))
+	setattr(o, name, o(reg, False, False, False, False, reg))
+	setattr(o, "a" + name, o(reg, True, False, False, False, 010 | reg))
+	setattr(o, name + "i", o(reg, False, True, False, False, 020 | reg))
+	setattr(o, "a" + name + "i", o(reg, True, True, False, False, 030 | reg))
+	setattr(o, "p" + name, o(reg, False, False, True, False, 040 | reg))
+	setattr(o, "ap" + name, o(reg, True, False, True, False, 050 | reg))
+	setattr(o, name + "o", o(reg, False, False, False, True, 060 | reg))
+	setattr(o, "a" + name + "o", o(reg, True, False, False, True, 070 | reg))
 #end for
 del reg
 
