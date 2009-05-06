@@ -7,6 +7,12 @@
 class o(object) :
 	"""container for operand objects."""
 
+	def __add__(self, offset) :
+		"""allows convenient r+offset notation."""
+		assert self.hasoffset, "offset not allowed on this operand"
+		return (self, offset)
+	#end __add__
+
 	def __init__(self, reg, ind, postinc, predec, hasoffset, bitpat) :
 		self.reg = reg # register nr [0 .. 7]
 		self.ind = ind # indirect (deferred)
@@ -16,22 +22,25 @@ class o(object) :
 		self.bitpat = bitpat
 	#end __init__
 
+	# Valid operand forms are defined as publicly-visible attributes of
+	# this class. Offset fields NYI
+
 #end o
 
 for \
-		name, reg \
+		name, reg, doindir \
 	in \
 		(
-			("R0", 0),
-			("R1", 1),
-			("R2", 2),
-			("R3", 3),
-			("R4", 4),
-			("R5", 5),
-			("R6", 6),
-			("SP", 6),
-			("R7", 7),
-			("PC", 7),
+			("R0", 0, True),
+			("R1", 1, True),
+			("R2", 2, True),
+			("R3", 3, True),
+			("R4", 4, True),
+			("R5", 5, True),
+			("R6", 6, True),
+			("SP", 6, True),
+			("R7", 7, False),
+			("PC", 7, False),
 		) \
 :
 	# names are
@@ -45,14 +54,19 @@ for \
 	#     o.aRno -- register + offset deferred
 	setattr(o, name, o(reg, False, False, False, False, reg))
 	setattr(o, "a" + name, o(reg, True, False, False, False, 010 | reg))
-	setattr(o, name + "i", o(reg, False, True, False, False, 020 | reg))
-	setattr(o, "a" + name + "i", o(reg, True, True, False, False, 030 | reg))
-	setattr(o, "p" + name, o(reg, False, False, True, False, 040 | reg))
-	setattr(o, "ap" + name, o(reg, True, False, True, False, 050 | reg))
+	setattr(o, name + "i", o(reg, False, True, False, not doindir, 020 | reg))
+	setattr(o, "a" + name + "i", o(reg, True, True, False, not doindir, 030 | reg))
+	if doindir :
+		# PC auto-decrement not supported
+		setattr(o, "p" + name, o(reg, False, False, True, False, 040 | reg))
+		setattr(o, "ap" + name, o(reg, True, False, True, False, 050 | reg))
+	#end if
 	setattr(o, name + "o", o(reg, False, False, False, True, 060 | reg))
 	setattr(o, "a" + name + "o", o(reg, True, False, False, True, 070 | reg))
 #end for
-del reg
+setattr(o, "a", o(7, True, True, False, True, 037)) # for absolute addressing
+# immediate operands handled specially
+del reg, doindir
 
 class cc(object) :
 	"""condition codes flags bits."""
@@ -64,6 +78,8 @@ class cc(object) :
 
 class op(object) :
 	"""container for instruction objects."""
+
+	# internal instruction-construction and operand-validation utilities
 
 	@staticmethod
 	def regonly(opnd, offset) :
@@ -169,14 +185,22 @@ class op(object) :
 		return (bitpat | operand1[0] | operand2[0], operand1[1] + operand2[1])
 	#end regandop
 
-	def __init__(self, bitpat, instr) :
+	def __init__(self, bitpat, nroperands, genmask, instr) :
 		self.bitpat = bitpat
+		self.nroperands = nroperands
+		self.genmask = genmask
 		self.instr = instr
 	#end __init__
 
 	def __call__(self, *operands) :
 		return self.instr(*(self.bitpat,) + operands)
 	#end __call__
+
+	# All the valid instructions are defined as publicly-visible attributes
+	# of this class. The value of each is a function that takes instruction
+	# operands as arguments, and returns a 2-tuple, with item 0 being the
+	# value of the first (or only) instruction word, and item 1 being the
+	# number of subsequent operand words.
 
 #end op
 
@@ -198,11 +222,11 @@ for \
 			("ASL", 0006300),
 		) \
 :
-	setattr(op, name, op(bitpat, op.singleoperand))
-	setattr(op, name + "B", op(bitpat | 0100000, op.singleoperand))
+	setattr(op, name, op(bitpat, 1, 1, op.singleoperand))
+	setattr(op, name + "B", op(bitpat | 0100000, 1, 1, op.singleoperand))
 #end for
-setattr(op, "SWAB", op(000300, op.singleoperand))
-setattr(op, "SXT", op(0006700, op.singleoperand))
+setattr(op, "SWAB", op(000300, 1, 1, op.singleoperand))
+setattr(op, "SXT", op(0006700, 1, 1, op.singleoperand))
 for \
 		name, bitpat \
 	in \
@@ -215,11 +239,11 @@ for \
 			("BIS", 050000),
 		) \
 :
-	setattr(op, name, op(bitpat, op.doubleoperand))
-	setattr(op, name + "B", op(bitpat | 0100000, op.doubleoperand))
+	setattr(op, name, op(bitpat, 2, 3, op.doubleoperand))
+	setattr(op, name + "B", op(bitpat | 0100000, 2, 3, op.doubleoperand))
 #end for
-setattr(op, "ADD", op(0060000, op.doubleoperand))
-setattr(op, "SUB", op(0160000, op.doubleoperand))
+setattr(op, "ADD", op(0060000, 2, 3, op.doubleoperand))
+setattr(op, "SUB", op(0160000, 2, 3, op.doubleoperand))
 for \
 		name, bitpat \
 	in \
@@ -230,9 +254,9 @@ for \
 			("ASHC", 073000),
 		) \
 :
-	setattr(op, name, op(bitpat, op.opandreg))
+	setattr(op, name, op(bitpat, 2, 3, op.opandreg))
 #end for
-setattr(op, "XOR", op(074000, op.regandop))
+setattr(op, "XOR", op(074000, 2, 3, op.regandop))
 for \
 		name, bitpat \
 	in \
@@ -256,23 +280,23 @@ for \
 			("BLO", 0103400),
 		) \
 :
-	setattr(op, name, op(bitpat, op.branchonly))
+	setattr(op, name, op(bitpat, 1, 0, op.branchonly))
 #end for
-setattr(op, "JMP", op(000100, op.singleoperand))
-setattr(op, "JSR", op(004000, op.regandop))
-setattr(op, "RTS", op(000200, op.singleregoperand))
-setattr(op, "MARK", op(006400, op.markoperand))
-setattr(op, "SOB", op(077000, op.regandbranch))
-setattr(op, "EMT", op(0104000, op.byteoperand))
-setattr(op, "TRAP", op(0104400, op.byteoperand))
-setattr(op, "BPT", op(000003, op.nooperand))
-setattr(op, "IOT", op(000004, op.nooperand))
-setattr(op, "RTI", op(000002, op.nooperand))
-setattr(op, "RTT", op(000006, op.nooperand))
-setattr(op, "SPL", op(000230, op.priooperand))
-setattr(op, "HALT", op(000000, op.nooperand))
-setattr(op, "WAIT", op(000001, op.nooperand))
-setattr(op, "RESET", op(000005, op.nooperand))
+setattr(op, "JMP", op(000100, 1, 1, op.singleoperand))
+setattr(op, "JSR", op(004000, 2, 3, op.regandop))
+setattr(op, "RTS", op(000200, 1, 1, op.singleregoperand))
+setattr(op, "MARK", op(006400, 1, 0, op.markoperand))
+setattr(op, "SOB", op(077000, 2, 1, op.regandbranch))
+setattr(op, "EMT", op(0104000, 1, 0, op.byteoperand))
+setattr(op, "TRAP", op(0104400, 1, 0, op.byteoperand))
+setattr(op, "BPT", op(000003, 0, 0, op.nooperand))
+setattr(op, "IOT", op(000004, 0, 0, op.nooperand))
+setattr(op, "RTI", op(000002, 0, 0, op.nooperand))
+setattr(op, "RTT", op(000006, 0, 0, op.nooperand))
+setattr(op, "SPL", op(000230, 1, 0, op.priooperand))
+setattr(op, "HALT", op(000000, 0, 0, op.nooperand))
+setattr(op, "WAIT", op(000001, 0, 0, op.nooperand))
+setattr(op, "RESET", op(000005, 0, 0, op.nooperand))
 for \
 		name, bitpat \
 	in \
@@ -283,22 +307,22 @@ for \
 			("MTPD", 0106600),
 		) \
 :
-	setattr(op, name, op(bitpat, op.singleoperand))
+	setattr(op, name, op(bitpat, 1, 1, op.singleoperand))
 #end for
 for name in dir(cc) :
 	if name[0] != "_" :
-		setattr(op, "CL" + name, op(000240 | getattr(cc, name), op.nooperand))
-		setattr(op, "SE" + name, op(000260 | getattr(cc, name), op.nooperand))
+		setattr(op, "CL" + name, op(000240 | getattr(cc, name), 0, 0, op.nooperand))
+		setattr(op, "SE" + name, op(000260 | getattr(cc, name), 0, 0, op.nooperand))
 	#end if
 #end for
-setattr(op, "CCC", op(000240, op.condoperand))
-setattr(op, "SCC", op(000260, op.condoperand))
-setattr(op, "NOP", op(000240, op.nooperand))
+setattr(op, "CCC", op(000240, 1, 0, op.condoperand))
+setattr(op, "SCC", op(000260, 1, 0, op.condoperand))
+setattr(op, "NOP", op(000240, 1, 0, op.nooperand))
 # FIS:
-setattr(op, "FADD", op(0750000, op.regoperand))
-setattr(op, "FSUB", op(0750010, op.regoperand))
-setattr(op, "FMUL", op(0750020, op.regoperand))
-setattr(op, "FDIV", op(0750030, op.regoperand))
+setattr(op, "FADD", op(0750000, 1, 1, op.regoperand))
+setattr(op, "FSUB", op(0750010, 1, 1, op.regoperand))
+setattr(op, "FMUL", op(0750020, 1, 1, op.regoperand))
+setattr(op, "FDIV", op(0750030, 1, 1, op.regoperand))
 del name, bitpat
 # FPP, CIS NYI
 
@@ -316,7 +340,7 @@ class CodeBuffer(object) :
 		#end register
 
 		class op(object) :
-			TBD
+			pass # TBD
 		#end op
 
 	#begin __init__
@@ -387,7 +411,7 @@ class CodeBuffer(object) :
 	def b(self, value) :
 		"""inserts a byte value at the current origin and advances it."""
 		assert self.origin != None, "origin not set"
-		self.db(self.origin. value)
+		self.db(self.origin, value)
 		self.origin = (self.origin + 1) % 0x10000
 		return self # for convenient chaining of calls
 	#end bi
@@ -396,15 +420,41 @@ class CodeBuffer(object) :
 		"""inserts a word value at the current origin (must be even) and advances it."""
 		assert self.origin != None, "origin not set"
 		assert (self.origin & 1) == 0, "origin must be even"
-		self.dw(self.origin. value)
+		self.dw(self.origin, value)
 		self.origin = (self.origin + 2) % 0x10000
 		return self # for convenient chaining of calls
 	#end w
 
 	def i(self, opcode, *args) :
-		"""inserts an instruction at the current origin (must be even) and advances it."""
-		(instr, extra) = opcode(*args)
-		TBD
+		"""inserts an instruction at the current origin (must be even) and advances it.
+		Each arg can be a register operand, or a 2-tuple of register + offset, or an
+		integer for an immediate-mode operand."""
+		assert len(args) == opcode.nroperands, "wrong nr operands"
+		opnds = []
+		extra = []
+		for arg in args :
+			if type(arg) == o :
+				opnds.append(arg)
+			elif type(arg) in (tuple, list) :
+				assert len(arg) == 2 and type(arg[0] == o) and arg[0].hasoffset, "invalid arg+offset"
+				opnds.append(arg[0])
+				extra.append(arg[1])
+			elif type(arg) == int :
+				if (opcode.genmask & 1 << len(opnds)) != 0 :
+					opnds.append(o.PCi)
+					extra.append(arg)
+				else :
+					opnds.append(arg)
+				#end if
+			else :
+				raise AssertionError("invalid arg type")
+			#end if
+		#end for
+		(instr, lenextra) = opcode(*opnds)
+		assert lenextra == 2 * len(extra), "wrong number of operand offsets"
+		for word in [instr] + extra :
+			self.w(word)
+		#end for
 		return self # for convenient chaining of calls
 	#end i
 

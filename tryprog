@@ -1,0 +1,21 @@
+#!/usr/bin/python
+#+
+# Test of my crosscode11 PDP-11 code-generation library.
+#
+# Written by Lawrence D'Olivero Lawrence D'Oliveiro <ldo@geek-central.gen.nz>.
+#-
+
+import sys
+from crosscode11 import \
+	CodeBuffer, \
+	o, op, \
+	dump_simh
+
+c = CodeBuffer()
+c.org(0200)
+c.i(op.MOV, 0300, o.R0)
+c.i(op.MOV, 0400, o.R1)
+c.i(op.MOVB, o.R0i, o.R1i)
+c.i(op.BNE, -2)
+c.start(0200)
+dump_simh(c, sys.stdout)
