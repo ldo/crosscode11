@@ -331,7 +331,7 @@ class CodeBuffer(object) :
 
 	def eb(self, addr) :
 		"""returns the byte at the specified adddress."""
-		(index, offset) = divmod(addr, (65536 / len(self.blocks)))
+		(index, offset) = divmod(addr, (65536 // len(self.blocks)))
 		if (
 				self.baseaddrs[index] != None
 			and
