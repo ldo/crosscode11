@@ -329,6 +329,91 @@ del name, bitpat
 class CodeBuffer(object) :
 	"""overall management of a block of generated code."""
 
+	class LabelClass(object) :
+		"""representation of a label within the CodeBuffer."""
+
+		# types of label references:
+		b16a = 0 # 16-bit absolute byte reference
+		b16r = 1 # 16-bit signed relative byte reference
+		w8 = 2 # 8-bit signed relative word reference (branch instr)
+		w6 = 3 # 6-bit negated word referene (sob instr)
+
+		def __init__(self, name, parent) :
+			self.refs = []
+			self.name = name
+			self.value = None # to begin with
+			self.parent = parent
+		#end __init__
+
+		def resolve(self, value = None) :
+			self.parent.resolve(self, value)
+			return self # for convenient chaining of calls
+		#end resolve
+
+		def resolved(self) :
+			"""returns True iff the label has been resolved."""
+			return self.value != None
+		#end if
+
+		def assert_resolved(self) :
+			"""asserts that the label has been resolved."""
+			if self.value == None :
+				raise AssertionError("label \"%s\" not resolved" % self.name)
+			#end if
+		#end assert_resolved
+
+	#end LabelClass
+
+	class PsectClass(object) :
+		"""representation of a program section within the CodeBuffer. Besides
+		allowing logical grouping of code and data sections, I also provide
+		automatic checking that psects don't run into each other."""
+
+		def __init__(self, name, parent) :
+			self.name = name
+			self.origin = None # to begin with
+			self.minaddr = None
+			self.maxaddr = None
+			self.parent = parent
+		#end __init__
+
+		def setorigin(self, neworigin) :
+			"""updates the origin."""
+			if neworigin != None :
+				check_overlap = False # to begin with
+				if self.minaddr == None or self.minaddr > neworigin :
+					self.minaddr = neworigin
+					check_overlap = True
+				#end if
+				if self.maxaddr == None or self.maxaddr < neworigin :
+					self.maxaddr = neworigin
+					check_overlap = True
+				#end if
+				if check_overlap :
+					for otherpsect in self.parent.psects.values() :
+						if (
+								otherpsect != self
+							and
+								neworigin >= otherpsect.minaddr
+							and
+								neworigin <= otherpsect.maxaddr
+						) :
+							raise AssertionError \
+							  (
+									"psect \"%s\" overlaps \"%s\" at location 0%06o"
+								%
+									(self.name, otherpsect.name, neworigin)
+							  )
+						#end if
+					#end for
+				#end if
+			#end if
+			self.origin = neworigin
+			return self # for convenient chaining of calls
+		#end setorigin
+
+	#end PsectClass
+
 	def __init__(self) :
 
 		class register(object) :
@@ -348,10 +433,111 @@ class CodeBuffer(object) :
 		  # length must exactly divide 65536
 		self.baseaddrs = [None] * len(self.blocks)
 		  # address corresponding to start of each block
-		self.origin = None
 		self.labels = {}
+		self.psects = {}
+		self.psect("") # initial default psect
 		self.startaddr = None
 	#end __init__
+
+	def label(self, name, resolve_here = False) :
+		"""defines a label with the specified name, if it doesn't already exist.
+		Else returns the existing label with that name."""
+		if not self.labels.has_key(name) :
+			self.labels[name] = self.LabelClass(name, self)
+		#end if
+		if resolve_here :
+			self.resolve(self.labels[name], self.curpsect.origin)
+		#end if
+		return self.labels[name]
+	#end label
+
+	def _fixup(self, label, addr, reftype) :
+		# common internal routine for actually fixing up a label reference.
+		assert label.value != None
+		if reftype == self.LabelClass.b16a :
+		  # 16-bit absolute byte reference
+			self.dw(addr, label.value)
+		elif reftype == self.LabelClass.b16r :
+		  # 16-bit signed relative byte reference
+			self.dw(addr, label.value - addr - 2)
+		elif reftype == self.LabelClass.w8 :
+		  # 8-bit signed relative word reference (branch instr)
+			assert (label.value & 1) == 0 and (addr & 1) == 0
+			offset = (label.value - addr - 2) // 2
+			assert offset >= -128 and offset < 128
+			self.db(addr, offset & 255)
+		elif reftype == self.LabelClass.w6 :
+		  # 6-bit negated word referene (sob instr)
+			assert (label.value & 1) == 0 and (addr & 1) == 0
+			offset = (addr + 2 - label.value) // 2
+			assert offset >= 0 and offset < 64
+			self.db(addr, self.eb(addr) & ~63 | offset)
+		#end if
+	#end _fixup
+
+	def refer(self, label, addr, reftype) :
+		"""inserts a reference to the specified label at the specified
+		location, of the specified type. May be called any number of times
+		before or after the label is resolved."""
+		addr = self.follow(addr)
+		assert reftype in \
+			(self.LabelClass.b16a, self.LabelClass.b16r, self.LabelClass.w8, self.LabelClass.w6)
+		if label.value != None :
+			# resolve straight away
+			self._fixup(label, addr, reftype)
+		else :
+			label.refs.append((addr, reftype)) # for later resolution
+		#end if
+		return self # for convenient chaining of calls
+	#end refer
+
+	def resolve(self, label, value = None) :
+		"""marks the label as resolved to the specified address, or the current
+		origin if None. Must be called exactly once per label."""
+		assert label.value == None # not already resolved
+		if value == None :
+			value = self.curpsect.origin
+		else :
+			value = self.follow(value)
+		#end if
+		assert value != None
+		label.value = value
+		for addr, bits in label.refs :
+			self._fixup(label, addr, bits)
+		#end for
+		label.refs = []
+		return self # for convenient chaining of calls
+	#end resolve
+
+	def follow(self, ref, atloc = None, reftype = None) :
+		# returns ref if it's an integer, or its value if it's a resolved label.
+		# An unresolved label is only allowed if atloc is not None; in which
+		# case a dummy value is returned, and a reference to the label is added
+		# pointing to address atloc of type reftype for fixing up later when the
+		# label is resolved.
+		if type(ref) == self.LabelClass :
+			if ref.value == None and atloc != None :
+				self.refer(ref, atloc, reftype)
+				ref = 0 # dummy value, filled in later
+			else :
+				ref = ref.value
+				assert ref != None, "reference to unresolved label %s" % ref.name
+			#end if
+		else :
+			ref = int(ref)
+		#end if
+		return ref
+	#end follow
+
+	def psect(self, name) :
+		"""sets the current program section to the one with the specified name,
+		creating it if it doesn't already exist."""
+		if not self.psects.has_key(name) :
+			self.psects[name] = self.PsectClass(name, self)
+		#end if
+		self.curpsect = self.psects[name]
+		return self # for convenient chaining of calls
+	#end psect
 
 	def eb(self, addr) :
 		"""returns the byte at the specified adddress."""
@@ -404,24 +590,24 @@ class CodeBuffer(object) :
 	def org(self, addr) :
 		"""sets the origin for defining subsequent consecutive memory contents."""
 		assert addr != None
-		self.origin = addr
+		self.curpsect.setorigin(addr)
 		return self # for convenient chaining of calls
 	#end org
 
 	def b(self, value) :
 		"""inserts a byte value at the current origin and advances it."""
-		assert self.origin != None, "origin not set"
-		self.db(self.origin, value)
-		self.origin = (self.origin + 1) % 0x10000
+		assert self.curpsect.origin != None, "origin not set"
+		self.db(self.curpsect.origin, value)
+		self.curpsect.setorigin((self.curpsect.origin + 1) % 0x10000)
 		return self # for convenient chaining of calls
 	#end bi
 
 	def w(self, value) :
 		"""inserts a word value at the current origin (must be even) and advances it."""
-		assert self.origin != None, "origin not set"
-		assert (self.origin & 1) == 0, "origin must be even"
-		self.dw(self.origin, value)
-		self.origin = (self.origin + 2) % 0x10000
+		assert self.curpsect.origin != None, "origin not set"
+		assert (self.curpsect.origin & 1) == 0, "origin must be even"
+		self.dw(self.curpsect.origin, value)
+		self.curpsect.setorigin((self.curpsect.origin + 2) % 0x10000)
 		return self # for convenient chaining of calls
 	#end w
 
