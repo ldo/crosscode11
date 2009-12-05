@@ -286,7 +286,7 @@ setattr(op, "JMP", op(000100, 1, 1, op.singleoperand))
 setattr(op, "JSR", op(004000, 2, 3, op.regandop))
 setattr(op, "RTS", op(000200, 1, 1, op.singleregoperand))
 setattr(op, "MARK", op(006400, 1, 0, op.markoperand))
-setattr(op, "SOB", op(077000, 2, 1, op.regandbranch))
+setattr(op, "SOB", op(077000, 2, 0, op.regandbranch))
 setattr(op, "EMT", op(0104000, 1, 0, op.byteoperand))
 setattr(op, "TRAP", op(0104400, 1, 0, op.byteoperand))
 setattr(op, "BPT", op(000003, 0, 0, op.nooperand))
@@ -626,9 +626,22 @@ class CodeBuffer(object) :
 		"""inserts an instruction at the current origin (must be even) and advances it.
 		Each arg can be a register operand, or a 2-tuple of register + offset, or an
 		integer for an immediate-mode operand."""
+
+		def place(val) :
+		  # returns a dummy integer value in place of val if it is a label.
+			if type(val) == self.LabelClass :
+				val = 0
+			# else :
+				# assume it's an int
+			#end if
+			return val
+		#end place
+
+	#begin i
 		assert len(args) == opcode.nroperands, "wrong nr operands"
 		opnds = []
 		extra = []
+		refer = []
 		for arg in args :
 			if type(arg) == o :
 				opnds.append(arg)
@@ -636,12 +649,26 @@ class CodeBuffer(object) :
 				assert len(arg) == 2 and type(arg[0] == o) and arg[0].hasoffset, "invalid arg+offset"
 				opnds.append(arg[0])
 				extra.append(arg[1])
-			elif type(arg) == int :
+				refer.append((arg[1], self.dot() + 2 * len(refer) + 2, self.LabelClass.b16a))
+			elif type(arg) in (int, self.LabelClass) :
 				if (opcode.genmask & 1 << len(opnds)) != 0 :
 					opnds.append(o.PCi)
 					extra.append(arg)
+					refer.append((arg, self.dot() + 2 * len(refer) + 2, self.LabelClass.b16a))
 				else :
-					opnds.append(arg)
+					opnds.append(place(arg))
+					assert len(refer) == 0
+					if type(arg) == self.LabelClass :
+						# assume branch or SOB
+						refer.append \
+						  (
+							(
+								arg,
+								self.dot(),
+								(self.LabelClass.w6, self.LabelClass.w8)[opcode != op.SOB]
+							)
+						  )
+					#end if
 				#end if
 			else :
 				raise AssertionError("invalid arg type")
@@ -650,7 +677,12 @@ class CodeBuffer(object) :
 		(instr, lenextra) = opcode(*opnds)
 		assert lenextra == 2 * len(extra), "wrong number of operand offsets"
 		for word in [instr] + extra :
-			self.w(word)
+			self.w(place(word))
+		#end for
+		for thisrefer in refer :
+			if type(thisrefer[0]) == self.LabelClass :
+				self.refer(*thisrefer)
+			#end if
 		#end for
 		return self # for convenient chaining of calls
 	#end i
