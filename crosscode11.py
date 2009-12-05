@@ -502,8 +502,8 @@ class CodeBuffer(object) :
 		#end if
 		assert value != None
 		label.value = value
-		for addr, bits in label.refs :
-			self._fixup(label, addr, bits)
+		for addr, reftype in label.refs :
+			self._fixup(label, addr, reftype)
 		#end for
 		label.refs = []
 		return self # for convenient chaining of calls
@@ -541,6 +541,7 @@ class CodeBuffer(object) :
 
 	def eb(self, addr) :
 		"""returns the byte at the specified adddress."""
+		addr = self.follow(addr)
 		(index, offset) = divmod(addr, (65536 // len(self.blocks)))
 		if (
 				self.baseaddrs[index] != None
@@ -558,12 +559,14 @@ class CodeBuffer(object) :
 
 	def ew(self, addr) :
 		"""returns the word at the specified address (must be even)."""
+		addr = self.follow(addr)
 		assert (addr & 1) == 0, "address must be even"
 		return self.eb(addr) | self.eb(addr + 1) << 8
 	#end ew
 
 	def db(self, addr, value) :
 		"""sets the byte at the specified address to the specified value."""
+		addr = self.follow(addr)
 		(index, offset) = divmod(addr, (65536 // len(self.blocks)))
 		incr = 256 # increment block sizes by whole multiples of this
 		if self.baseaddrs[index] == None or self.baseaddrs[index] > addr :
@@ -583,6 +586,7 @@ class CodeBuffer(object) :
 
 	def dw(self, addr, value) :
 		"""sets the word at the specified address (must be even) to the specified value."""
+		addr = self.follow(addr)
 		assert (addr & 1) == 0, "address must be even"
 		return self.db(addr, value & 255).db(addr + 1, value >> 8 & 255)
 	#end dw
@@ -590,7 +594,7 @@ class CodeBuffer(object) :
 	def org(self, addr) :
 		"""sets the origin for defining subsequent consecutive memory contents."""
 		assert addr != None
-		self.curpsect.setorigin(addr)
+		self.curpsect.setorigin(self.follow(addr))
 		return self # for convenient chaining of calls
 	#end org
 
@@ -648,7 +652,7 @@ class CodeBuffer(object) :
 		"""sets the start-address of the program. This is purely informational
 		as far as ths CodeBuffer class is concerned."""
 		assert self.startaddr == None
-		self.startaddr = startaddr
+		self.startaddr = self.follow(startaddr)
 		return self # for convenient chaining of calls
 	#end start
 
