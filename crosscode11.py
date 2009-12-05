@@ -445,7 +445,9 @@ class CodeBuffer(object) :
 		if not self.labels.has_key(name) :
 			self.labels[name] = self.LabelClass(name, self)
 		#end if
-		if resolve_here :
+		if type(resolve_here) in (int, self.LabelClass) :
+			self.resolve(self.labels[name], resolve_here)
+		elif resolve_here :
 			self.resolve(self.labels[name], self.curpsect.origin)
 		#end if
 		return self.labels[name]
@@ -520,8 +522,8 @@ class CodeBuffer(object) :
 				self.refer(ref, atloc, reftype)
 				ref = 0 # dummy value, filled in later
 			else :
+				assert ref.value != None, "reference to unresolved label %s" % ref.name
 				ref = ref.value
-				assert ref != None, "reference to unresolved label %s" % ref.name
 			#end if
 		else :
 			ref = int(ref)
@@ -597,6 +599,11 @@ class CodeBuffer(object) :
 		self.curpsect.setorigin(self.follow(addr))
 		return self # for convenient chaining of calls
 	#end org
+
+	def dot(self) :
+		"""returns the current location for inserting memory contents."""
+		return self.curpsect.origin
+	#end dot
 
 	def b(self, value) :
 		"""inserts a byte value at the current origin and advances it."""
