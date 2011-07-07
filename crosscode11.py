@@ -23,7 +23,7 @@ class o(object) :
 	#end __init__
 
 	# Valid operand forms are defined as publicly-visible attributes of
-	# this class. Offset fields NYI
+	# this class. Offset fields TBD
 
 #end o
 
@@ -79,58 +79,78 @@ class cc(object) :
 class op(object) :
 	"""container for instruction objects."""
 
-	# internal instruction-construction and operand-validation utilities
+	# begin internal operand-validation utilities. Each of these takes an
+	# object of class o (above), and a bit offset into the opcode word at
+	# which to insert the operand field. The result is a 2-tuple,
+	# the first element being a mask to inclusive-or with the opcode word
+	# to insert the operand descriptor field, the second element being the
+	# integer number of additional operand words expected.
 
 	@staticmethod
 	def regonly(opnd, offset) :
-		"""validates a register-only operand."""
+		# validates a register-only operand.
 		assert (opnd.bitpat & 070) == 0, "register operand only"
 		return (opnd.reg << offset, 0)
 	#end regonly
 
 	@staticmethod
 	def general(opnd, offset) :
-		"""validates a general operand."""
+		# validates a general operand.
 		return (opnd.bitpat << offset, (0, 2)[opnd.hasoffset])
 	#end general
 
+	# end internal operand-validation utilities
+
+	# begin internal instruction-construction utilities. Each of these takes
+	# a basic opcode word with all relevant operand descriptor fields initialized
+	# to zero, plus 0 .. 2 additional arguments being operands of class o (above).
+	# The result is a 2-tuple, the first element being the instruction opcode
+	# word with all operand descriptor fields filled in, and the second being
+	# the integer number of additional operand words expected.
+
 	@staticmethod
 	def branchonly(bitpat, opnd) :
-		assert type(opnd) == int, "branch offset must be integer for now"
+		# destination for branch instruction
+		assert type(opnd) == int, "branch offset must be integer"
 		assert opnd >= -128 and opnd < 128, "branch offset outside valid range"
 		return (bitpat | (opnd & 255), 0)
 	#end branchonly
 
 	@staticmethod
 	def regandbranch(bitpat, opnd1, opnd2) :
+		# operands for SOB instruction
 		operand1 = op.regonly(opnd1, 6)
-		assert type(opnd2) == int, "operand2 must be integer for now"
+		assert type(opnd2) == int, "operand2 must be integer"
 		assert opnd2 >= 0 and opnd2 < 64, "branch offset outside valid range"
 		return (bitpat | operand1[0] | (opnd & 63), operand1[1])
 	#end regandbranch
 
 	@staticmethod
 	def byteoperand(bitpat, opnd) :
+		# literal byte operand for EMT and TRAP instructions
 		assert type(opnd) == int, "operand must be integer"
-		assert opnd >= 0 and opnd < 256, "branch offset outside valid range"
+		assert opnd >= 0 and opnd < 256, "byte operand outside valid range"
 		return (bitpat | (opnd & 255), 0)
 	#end byteoperand
 
 	@staticmethod
 	def priooperand(bitpat, opnd) :
+		# literal priority for SPL instruction
 		assert type(opnd) == int, "operand must be integer"
 		assert opnd >= 0 and opnd < 8, "priority outside valid range"
 		return (bitpat | (opnd & 7), 0)
-	#end byteoperand
+	#end priooperand
 
 	@staticmethod
 	def regoperand(bitpat, opnd) :
+		# single register operand for RTS/FADD/FSUB/FMUL/FDIV
 		operand = op.regonly(opnd, 0)
 		return (bitpat | operand[0], operand[1])
 	#end regoperand
 
 	@staticmethod
 	def markoperand(bitpat, opnd) :
+		# literal integer operand for MARK instruction
 		assert type(opnd) == int, "operand must be integer"
 		assert opnd >= 0 and opnd < 64, "mark count outside valid range"
 		return (bitpat | (opnd & 63), 0)
@@ -138,23 +158,20 @@ class op(object) :
 
 	@staticmethod
 	def nooperand(bitpat) :
+		# instruction with no operands
 		return (bitpat, 0)
 	#end nooperand
 
 	@staticmethod
 	def singleoperand(bitpat, opnd) :
+		# instruction with single general operand
 		operand = op.general(opnd, 0)
 		return (bitpat | operand[0], operand[1])
 	#end singleoperand
 
 	@staticmethod
-	def singleregoperand(bitpat, opnd) :
-		operand = op.regonly(opnd, 0)
-		return (bitpat | operand[0], operand[1])
-	#end singleregoperand
-
-	@staticmethod
 	def condoperand(bitpat, opnd = None) :
+		# instruction with condition-code operand (defaulting to true if none)
 		if opnd != None :
 			assert type(opnd) == int, "operand must be integer"
 			assert opnd >= 0 and opnd < 16, "condition flag mask outside valid range"
@@ -166,6 +183,7 @@ class op(object) :
 
 	@staticmethod
 	def doubleoperand(bitpat, opnd1, opnd2) :
+		# instruction with two general operands
 		operand1 = op.general(opnd1, 6)
 		operand2 = op.general(opnd2, 0)
 		return (bitpat | operand1[0] | operand2[0], operand1[1] + operand2[1])
@@ -173,6 +191,7 @@ class op(object) :
 
 	@staticmethod
 	def opandreg(bitpat, opnd1, opnd2) :
+		# instruction with one general and one register operand, in that order (MUL, DIV, ASH, ASHC)
 		operand1 = op.general(opnd1, 0)
 		operand2 = op.regonly(opnd2, 6)
 		return (bitpat | operand1[0] | operand2[0], operand1[1] + operand2[1])
@@ -180,15 +199,18 @@ class op(object) :
 
 	@staticmethod
 	def regandop(bitpat, opnd1, opnd2) :
+		# instruction with one register and one general operand, in that order (XOR, JSR)
 		operand1 = op.regonly(opnd1, 6)
 		operand2 = op.general(opnd2, 0)
 		return (bitpat | operand1[0] | operand2[0], operand1[1] + operand2[1])
 	#end regandop
 
+	# end internal instruction-construction utilities
+
 	def __init__(self, bitpat, nroperands, genmask, instr) :
 		self.bitpat = bitpat
 		self.nroperands = nroperands
-		self.genmask = genmask
+		self.genmask = genmask # mask for which operands are general
 		self.instr = instr
 	#end __init__
 
@@ -196,11 +218,11 @@ class op(object) :
 		return self.instr(*(self.bitpat,) + operands)
 	#end __call__
 
-	# All the valid instructions are defined as publicly-visible attributes
-	# of this class. The value of each is a function that takes instruction
-	# operands as arguments, and returns a 2-tuple, with item 0 being the
-	# value of the first (or only) instruction word, and item 1 being the
-	# number of subsequent operand words.
+	# All the valid instructions are defined (below) as publicly-visible
+	# attributes of this class. The value of each is a function that takes
+	# instruction operands as arguments, and returns a 2-tuple, with item 0
+	# being the value of the first (or only) instruction word, and item 1 being
+	# the number of subsequent operand words.
 
 #end op
 
@@ -284,7 +306,7 @@ for \
 #end for
 setattr(op, "JMP", op(000100, 1, 1, op.singleoperand))
 setattr(op, "JSR", op(004000, 2, 3, op.regandop))
-setattr(op, "RTS", op(000200, 1, 1, op.singleregoperand))
+setattr(op, "RTS", op(000200, 1, 1, op.regoperand))
 setattr(op, "MARK", op(006400, 1, 0, op.markoperand))
 setattr(op, "SOB", op(077000, 2, 0, op.regandbranch))
 setattr(op, "EMT", op(0104000, 1, 0, op.byteoperand))
