@@ -677,7 +677,7 @@ class CodeBuffer(object) :
 			if type(arg) == o :
 				opnds.append(arg)
 			elif type(arg) in (tuple, list) :
-				assert len(arg) == 2 and type(arg[0] == o) and arg[0].hasoffset, "invalid arg+offset"
+				assert len(arg) == 2 and type(arg[0]) == o and arg[0].hasoffset, "invalid arg+offset"
 				opnds.append(arg[0])
 				extra.append(arg[1])
 				refer.append((arg[1], self.dot() + 2 * len(refer) + 2, self.LabelClass.b16a))
