@@ -32,7 +32,7 @@ class o(object) :
 	# this class. Operands requiring offset fields are represented as
 	# 2-tuples, the first element being an operand object and the second
 	# being the integer offset.
-	# TBD proper handling of absolute/relative addressing and immediate operands
+	# TBD proper handling of absolute/relative addressing
 
 #end o
 
