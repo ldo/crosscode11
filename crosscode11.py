@@ -72,6 +72,7 @@ for \
 	setattr(o, name + "o", o(reg, False, False, False, True, 060 | reg))
 	setattr(o, "a" + name + "o", o(reg, True, False, False, True, 070 | reg))
 #end for
+setattr(o, "i", o(7, False, True, False, True, 027)) # for immediate addressing
 setattr(o, "a", o(7, True, True, False, True, 037)) # for absolute addressing
 # immediate operands handled specially
 del reg, doindir
@@ -669,7 +670,11 @@ class CodeBuffer(object) :
 			elif type(arg) in (int, self.LabelClass) :
 				if (opcode.genmask & 1 << len(opnds)) != 0 :
 					opnds.append(o.PCo) # PC-relative addressing
-					extra.append(arg)
+					if type(arg) == int :
+						extra.append(arg - self.dot() + 2 * len(refer) - 4)
+					else :
+						extra.append(arg)
+					#end if
 					refer.append((arg, self.dot() + 2 * len(refer) + 2, self.LabelClass.b16r))
 				else :
 					opnds.append(place(arg))
