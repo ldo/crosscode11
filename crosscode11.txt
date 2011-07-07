@@ -56,11 +56,15 @@ prepended or appended as appropriate to denote an addressing mode (\ *n* ∊ 0 .
     +-----------------------+-----------------------+----------------------------------+
     | o.aR\ *n*\ o + *offs* | @\ *offs*\ (R\ *n*\ ) | register + offset deferred       |
     +-----------------------+-----------------------+----------------------------------+
+    | o.i + *val*           | #\ *val*              | immediate operand                |
+    +-----------------------+-----------------------+----------------------------------+
     | o.a + *addr*          | @#\ *addr*            | absolute address                 |
     +-----------------------+-----------------------+----------------------------------+
 
 As usual, the name ``SP`` (stack pointer) may be used as a synonym for ``R6``\ ,
-and ``PC`` (program counter) for ``R7``\ .
+and ``PC`` (program counter) for ``R7``\ . In the last two entries, *val* and *addr*
+may be labels as well as integers. If an instruction operand is not one of the above but is
+a simple label or integer, it is treated as a relative address.
 
 For example, the following assembly-language sequence::
 
@@ -89,7 +93,7 @@ outputs a single character passed to it in R0::
 
     c.psect("main")
     c.org(0200)
-    c.i(op.MOV, c.label("thestr"), o.R4) # TBD wrong, need immediate-mode reference
+    c.i(op.MOV, o.i + c.label("thestr"), o.R4)
     c.label("outnext").resolve()
     c.label("done")
     c.i(op.MOV, o.R4i, o.R0)
