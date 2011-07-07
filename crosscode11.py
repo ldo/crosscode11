@@ -445,20 +445,6 @@ class CodeBuffer(object) :
 	#end PsectClass
 
 	def __init__(self) :
-
-		class register(object) :
-
-			def __init__(self, nr) :
-				self.nr = nr
-			#end __init__
-
-		#end register
-
-		class op(object) :
-			pass # TBD
-		#end op
-
-	#begin __init__
 		self.blocks = [[] * 8] # contiguous sequences of defined memory content bytes
 		  # length must exactly divide 65536
 		self.baseaddrs = [None] * len(self.blocks)
