@@ -19,8 +19,7 @@ thestr = c.label("thestr")
 c.psect("main")
 c.org(0200)
 start = c.label("start", True)
-c.i(op.MOV, thestr, o.R0) # wrong
-# c.i(op.MOV, o.i + thestr, o.R0) # TBD need to get this to work
+c.i(op.MOV, o.i + thestr, o.R0)
 loop = c.label("loop", True)
 done = c.label("done")
 c.i(op.MOVB, o.R0i, o.R1)

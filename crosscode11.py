@@ -10,13 +10,23 @@ class o(object) :
 	def __add__(self, offset) :
 		"""allows convenient r+offset notation."""
 		assert self.hasoffset, "offset not allowed on this operand"
-		return (self, offset)
+		if type(offset) == int :
+			return (self, offset)
+		else :
+			return NotImplemented
+		#end if
 	#end __add__
+
+	__radd__ = __add__
 
 	def __sub__(self, offset) :
 		"""allows convenient r-offset notation."""
 		assert self.hasoffset, "offset not allowed on this operand"
-		return (self, 0177777 ^ offset)
+		if type(offset) == int :
+			return (self, 0177777 ^ offset)
+		else :
+			return NotImplemented
+		#end if
 	#end __sub__
 
 	def __init__(self, reg, ind, postinc, predec, hasoffset, bitpat) :
@@ -393,6 +403,20 @@ class CodeBuffer(object) :
 			#end if
 		#end assert_resolved
 
+		def __add__(self, reg) :
+			"""allows convenient r+offset notation."""
+			if type(reg) == o :
+				assert reg.hasoffset, "offset not allowed on this operand"
+				return (reg, self)
+			else :
+				return NotImplemented
+			#end if
+		#end __add__
+
+		__radd__ = __add__
+
+		# note no __sub__ or __rsub__
+
 	#end LabelClass
 
 	class PsectClass(object) :
@@ -664,7 +688,13 @@ class CodeBuffer(object) :
 				opnds.append(arg)
 			elif type(arg) in (tuple, list) :
 				assert len(arg) == 2 and type(arg[0]) == o and arg[0].hasoffset, "invalid arg+offset"
-				opnds.append(arg[0])
+				if arg[0] == o.i :
+					opnds.append(o.PCi)
+				elif arg[0] == o.a :
+					opnds.append(o.aPCi)
+				else :
+					opnds.append(arg[0])
+				#end if
 				extra.append(arg[1])
 				refer.append((arg[1], self.dot() + 2 * len(refer) + 2, self.LabelClass.b16a))
 			elif type(arg) in (int, self.LabelClass) :
