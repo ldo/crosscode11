@@ -683,7 +683,9 @@ class CodeBuffer(object) :
 				refer.append((arg[1], self.dot() + 2 * len(refer) + 2, self.LabelClass.b16a))
 			elif type(arg) in (int, self.LabelClass) :
 				if (opcode.genmask & 1 << len(opnds)) != 0 :
-					opnds.append(o.PCi)
+					opnds.append(o.aPCi)
+					  # TBD perhaps default to relative addressing instead, and
+					  # add some way of explicitly specifying absolute addressing
 					extra.append(arg)
 					refer.append((arg, self.dot() + 2 * len(refer) + 2, self.LabelClass.b16a))
 				else :
