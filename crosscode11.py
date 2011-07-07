@@ -32,7 +32,6 @@ class o(object) :
 	# this class. Operands requiring offset fields are represented as
 	# 2-tuples, the first element being an operand object and the second
 	# being the integer offset.
-	# TBD proper handling of absolute/relative addressing
 
 #end o
 
@@ -348,7 +347,7 @@ for name in dir(cc) :
 #end for
 setattr(op, "CCC", op(000240, 1, 0, op.condoperand))
 setattr(op, "SCC", op(000260, 1, 0, op.condoperand))
-setattr(op, "NOP", op(000240, 1, 0, op.nooperand))
+setattr(op, "NOP", op(000240, 0, 0, op.nooperand))
 # FIS:
 setattr(op, "FADD", op(0750000, 1, 1, op.regoperand))
 setattr(op, "FSUB", op(0750010, 1, 1, op.regoperand))
@@ -669,7 +668,7 @@ class CodeBuffer(object) :
 		#end place
 
 	#begin i
-		assert len(args) == opcode.nroperands, "wrong nr operands"
+		assert len(args) == opcode.nroperands, "wrong nr operands %d, expect %d" % (len(args), opcode.nroperands)
 		opnds = []
 		extra = []
 		refer = []
@@ -683,11 +682,9 @@ class CodeBuffer(object) :
 				refer.append((arg[1], self.dot() + 2 * len(refer) + 2, self.LabelClass.b16a))
 			elif type(arg) in (int, self.LabelClass) :
 				if (opcode.genmask & 1 << len(opnds)) != 0 :
-					opnds.append(o.aPCi)
-					  # TBD perhaps default to relative addressing instead, and
-					  # add some way of explicitly specifying absolute addressing
+					opnds.append(o.PCo) # PC-relative addressing
 					extra.append(arg)
-					refer.append((arg, self.dot() + 2 * len(refer) + 2, self.LabelClass.b16a))
+					refer.append((arg, self.dot() + 2 * len(refer) + 2, self.LabelClass.b16r))
 				else :
 					opnds.append(place(arg))
 					assert len(refer) == 0
