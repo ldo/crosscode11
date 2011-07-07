@@ -13,6 +13,12 @@ class o(object) :
 		return (self, offset)
 	#end __add__
 
+	def __sub__(self, offset) :
+		"""allows convenient r-offset notation."""
+		assert self.hasoffset, "offset not allowed on this operand"
+		return (self, 0177777 ^ offset)
+	#end __sub__
+
 	def __init__(self, reg, ind, postinc, predec, hasoffset, bitpat) :
 		self.reg = reg # register nr [0 .. 7]
 		self.ind = ind # indirect (deferred)
@@ -23,7 +29,10 @@ class o(object) :
 	#end __init__
 
 	# Valid operand forms are defined as publicly-visible attributes of
-	# this class. Offset fields TBD
+	# this class. Operands requiring offset fields are represented as
+	# 2-tuples, the first element being an operand object and the second
+	# being the integer offset.
+	# TBD proper handling of absolute/relative addressing and immediate operands
 
 #end o
 
