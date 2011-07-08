@@ -8,9 +8,10 @@ crosscode11 -- cross-generation of PDP-11 machine code from Python
 **crosscode11** is like a cross-assembler for the PDP-11\ [1]_. Only,
 instead of conventional assembler syntax, the program is written
 as a Python script. This script will contain calls to generate the
-machine code, and presumably to output it in some form. Having the
-full power of Python available allows for more powerful code-generation
-possibilities, beyond those of conventional macro assemblers.
+machine code, and to output it in some form, for example to execute
+on the SIMH\ [2]_ emulator. Having the full power of Python available
+allows for more powerful code-generation possibilities, beyond those
+of conventional macro assemblers.
 
 The ``crosscode11`` module contains 3 main classes: **o**, **op** and **CodeBuffer**.
 You create an instance of the ``CodeBuffer`` class as a place to hold the generated
@@ -123,10 +124,12 @@ Additional Functions
 
 **dump_simh(**\ *codebuffer*\ , *output*\ **)**
     This writes out the contents of the specified *codebuffer* to the specified
-    *output* stream in the form of SIMH\ [2]_ commands to deposit the code into
+    *output* stream in the form of SIMH commands to deposit the code into
     the emulated machine memory.
 
 .. [1] The PDP-11 was a family of 16-bit minicomputers manufactured
    by Digital Equipment Corporation from the late 1960s onwards.
+   For more information, check out sites like `pdp11.org <http://www.pdp11.org/>`_
+   and `bitsavers.org <http://bitsavers.org/>`_.
 .. [2] `SIMH <http://simh.trailing-edge.com/>`_ is a collection of high-fidelity
    software emulators for various classic computer architectures, including the PDP-11.
