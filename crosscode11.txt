@@ -122,6 +122,13 @@ Additional Functions
     by ``dump_simh`` (below) to generate a SIMH command to transfer control
     to that address after depositing the program into memory.
 
+**gen_pt_boot(**\ *codebuffer*\ , *memsize*\ , *devaddr*\ **)**
+    This generates the paper-tape bootstrap loader code into *codebuffer*
+    at the appropriate absolute address. *memsize* is the memory size in
+    integer kiB [8 .. 56], and *devaddr* is the device status register address
+    of the paper-tape reader: 0o177560 for the teletype, 0o177550 for the
+    high-speed reader.
+
 **dump_simh(**\ *codebuffer*\ , *output*\ **)**
     This writes out the contents of the specified *codebuffer* to the specified
     *output* stream in the form of SIMH commands to deposit the code into

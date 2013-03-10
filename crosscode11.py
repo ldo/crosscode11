@@ -821,6 +821,29 @@ class CodeBuffer(object) :
 
 #end CodeBuffer
 
+def gen_pt_boot(buf, memsize, devaddr) :
+    """generates the paper tape bootstrap loader code into the appropriate
+    absolute addresses in CodeBuffer object buf. memsize is the memory size
+    in integer kiB [8 .. 56], and devaddr is the device status register address
+    of the paper-tape reader: 0o177560 for the teletype, 0o177550 for the
+    high-speed reader."""
+    base = (memsize * 1024 // 4096 - 1) << 12
+    buf.org(base + 0o7744)
+    buf.w(0o16701).w(0o00026) # mov xx7776, r1 ; get device status register address
+    # top of read loop
+    buf.w(0o12702).w(0o00352)
+      #  mov #0352, r2 ; initially read byte into xx7752 = low byte of dest addr
+      # low byte of source operand will be overwritten by first input byte
+    buf.w(0o05211) #  inc (r1)    ; await another char
+    buf.w(0o105711) #  tstb (r1)   ; read done?
+    buf.w(0o100376) #  bpl xx7756  ; keep testing if not
+    buf.w(0o116162).w(0o000002).w(base + 0o7400)
+      #  movb 2(r1), xx7400(r2) ; read byte into dest addr
+    buf.w(0o005267).w(0o177756) #  inc xx7752  ; step dest addr
+    buf.w(0o000765) #  br xx7750 ; back to top of read loop
+    buf.w(devaddr)
+#end gen_pt_boot
+
 def dump_simh(buf, out) :
     """dumps the contents of CodeBuffer object buf to out as a sequence of
     SIMH memory-deposit commands."""
