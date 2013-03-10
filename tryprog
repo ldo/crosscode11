@@ -7,9 +7,9 @@
 
 import sys
 from crosscode11 import \
-	CodeBuffer, \
-	o, op, \
-	dump_simh
+    CodeBuffer, \
+    o, op, \
+    dump_simh
 
 c = CodeBuffer()
 tto_xcsr = c.label("tto_xcsr", 0177564)
@@ -39,7 +39,7 @@ c.psect("data")
 c.org(0300)
 thestr.resolve()
 for ch in "hi there!\015\012" :
-	c.b(ord(ch))
+    c.b(ord(ch))
 #end for
 c.b(0)
 c.align()
