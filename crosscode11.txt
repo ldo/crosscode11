@@ -129,6 +129,18 @@ Additional Functions
     of the paper-tape reader: 0o177560 for the teletype, 0o177550 for the
     high-speed reader.
 
+**rad50(**\ *s*\ **)**
+    encodes a string or a bytes sequence in radix-50. The result is a list of
+    integers, one for each group of 3 characters or bytes in *s*. If the length
+    of *s* is not a multiple of 3, it will be padded with blanks on the end.
+    Lowercase characters are converted to uppercase for encoding, and all
+    unrecognized characters (including “?”) are encoded as the “unused” code.
+
+**unrad50(**\ *n*\ **)**
+    The inverse of **rad50(**\ *s*\ **)**\ : given an integer or a sequence of
+    integers, interprets them as radix-50-encoded triples of bytes, and returns
+    the concatenation of the decoding. The “unused” code is decoded to “?”.
+
 **dump_simh(**\ *codebuffer*\ , *output*\ **)**
     This writes out the contents of the specified *codebuffer* to the specified
     *output* stream in the form of SIMH commands to deposit the code into

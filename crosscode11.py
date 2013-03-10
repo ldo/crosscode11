@@ -821,6 +821,71 @@ class CodeBuffer(object) :
 
 #end CodeBuffer
 
+def rad50(s) :
+    """returns the radix-50 encoding of s, which must be a string or a bytes
+    value. The result will be a list of integers, one for each group of 3
+    characters/bytes in s. If its length is not a multiple of 3, the last
+    group will be padded on the end with blanks."""
+    if type(s) != bytes :
+        s = s.encode()
+    #end if
+    if len(s) % 3 != 0 :
+        s += b"  "[0 : 3 - len(s) % 3]
+    #end if
+    result = []
+    n = None
+    for c in s :
+        if n == None :
+            n = 0
+            i = 64000
+        #end if
+        if c >= ord(b'a') and c <= ord(b'z') :
+            c = c - ord(b'a') + 1
+        elif c >= ord(b'A') and c <= ord(b'Z') :
+            c = c - ord(b'A') + 1
+        elif c >= ord(b'0') and c <= ord(b'9') :
+            c = c - ord(b'0') + 30
+        elif c == ord(b' ') :
+            c = 0
+        elif c == ord(b'$') :
+            c = 27
+        elif c == ord(b'.') :
+            c = 28
+        else :
+            c = 29
+        #end if
+        i //= 40
+        n += c * i
+        if i == 1 :
+            result.append(n)
+            n = None
+        #end if
+    #end for
+    return \
+        result
+#end rad50
+
+def unrad50(n) :
+    """returns the decoding of the radix-50 code(s) in n, which must be
+    either an integer or a sequence of integers. Each integer is decoded
+    to 3 bytes, and the result will be their concatenation in order."""
+    if type(n) == int :
+        n = (n,)
+    #end if
+    result = []
+    for g in n :
+        i = 64000
+        for j in range(0, 3) :
+            i //= 40
+            d = g // i
+            g = g - d * i
+            result.append(b" ABCDEFGHIJKLMNOPQRSTUVWXYZ$.?0123456789"[d])
+        #end for
+    #end for
+    return \
+        bytes(result)
+#end unrad50
+
 def gen_pt_boot(buf, memsize, devaddr) :
     """generates the paper tape bootstrap loader code into the appropriate
     absolute addresses in CodeBuffer object buf. memsize is the memory size
