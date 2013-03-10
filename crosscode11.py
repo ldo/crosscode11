@@ -510,7 +510,7 @@ class CodeBuffer(object) :
 			assert offset >= -128 and offset < 128
 			self.db(addr, offset & 255)
 		elif reftype == self.LabelClass.w6 :
-		  # 6-bit negated word referene (sob instr)
+		  # 6-bit negated word reference (sob instr)
 			assert (label.value & 1) == 0 and (addr & 1) == 0
 			offset = (addr + 2 - label.value) // 2
 			assert offset >= 0 and offset < 64
