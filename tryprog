@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 #+
 # Test of my crosscode11 PDP-11 code-generation library.
 #
@@ -12,12 +12,12 @@ from crosscode11 import \
     dump_simh
 
 c = CodeBuffer()
-tto_xcsr = c.label("tto_xcsr", 0177564)
-tto_xbuf = c.label("tto_xbuf", 0177566)
+tto_xcsr = c.label("tto_xcsr", 0o177564)
+tto_xbuf = c.label("tto_xbuf", 0o177566)
 thestr = c.label("thestr")
 
 c.psect("main")
-c.org(0200)
+c.org(0o200)
 start = c.label("start", True)
 c.i(op.MOV, o.i + thestr, o.R0)
 loop = c.label("loop", True)
@@ -25,18 +25,18 @@ done = c.label("done")
 c.i(op.MOVB, o.R0i, o.R1)
 c.i(op.BEQ, done)
 wait = c.label("wait", True)
-c.i(op.BIT, o.i + 0000200, (o.a, tto_xcsr))
+c.i(op.BIT, o.i + 0o000200, (o.a, tto_xcsr))
 c.i(op.BEQ, wait)
 c.i(op.MOVB, o.R1, (o.a, tto_xbuf))
 c.i(op.BR, loop)
 done.resolve()
 lastwait = c.label("lastwait", True) # wait for last character to be output
-c.i(op.BIT, o.i + 0000200, (o.a, tto_xcsr))
+c.i(op.BIT, o.i + 0o000200, (o.a, tto_xcsr))
 c.i(op.BEQ, lastwait)
 c.i(op.HALT)
 
 c.psect("data")
-c.org(0300)
+c.org(0o300)
 thestr.resolve()
 for ch in "hi there!\015\012" :
     c.b(ord(ch))

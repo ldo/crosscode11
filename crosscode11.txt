@@ -7,7 +7,7 @@ crosscode11 -- cross-generation of PDP-11 machine code from Python
 
 **crosscode11** is like a cross-assembler for the PDP-11\ [1]_. Only,
 instead of conventional assembler syntax, the program is written
-as a Python script. This script will contain calls to generate the
+as a Python 3 script. This script will contain calls to generate the
 machine code, and to output it in some form, for example to execute
 on the SIMH\ [2]_ emulator. Having the full power of Python available
 allows for more powerful code-generation possibilities, beyond those
@@ -21,7 +21,7 @@ dealing with explicit address allocations. E.g.::
 
     c = CodeBuffer()
     l = c.label("here") # declare a label called "here", initially unresolved
-    c.org(0200) # set starting location for inserting memory contents
+    c.org(0o200) # set starting location for inserting memory contents
     l.resolve() # resolve label "here" to current location, 200 octal
 
 The ``op`` class contains definitions of all the available PDP-11 instruction
@@ -75,7 +75,7 @@ For example, the following assembly-language sequence::
 
 could be generated as::
 
-    c.i(op.MOV, o.R3o + 0100, o.R0)
+    c.i(op.MOV, o.R3o + 0o100, o.R0)
     c.label("again").resolve()
     c.i(op.MOVB, o.R0i, o.R1i)
     c.i(op.BNE, c.label("again"))
@@ -93,7 +93,7 @@ a terminal device, given a routine called ``ttyout`` (defined elsewhere) which
 outputs a single character passed to it in R0::
 
     c.psect("main")
-    c.org(0200)
+    c.org(0o200)
     c.i(op.MOV, o.i + c.label("thestr"), o.R4)
     c.label("outnext").resolve()
     c.label("done")
@@ -107,7 +107,7 @@ The string to be output is pointed to by the label ``thestr``, which
 could be defined in another PSECT::
 
     c.psect("data")
-    c.org(01000)
+    c.org(0o1000)
     c.label("thestr").resolve()
     for ch in "hi there!\015\012" :
         c.b(ord(ch))

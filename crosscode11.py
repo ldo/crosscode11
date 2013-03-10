@@ -23,7 +23,7 @@ class o(object) :
         """allows convenient r-offset notation."""
         assert self.hasoffset, "offset not allowed on this operand"
         if type(offset) == int :
-            return (self, 0177777 ^ offset)
+            return (self, 0o177777 ^ offset)
         else :
             return NotImplemented
         #end if
@@ -71,19 +71,19 @@ for \
     #     o.Rno -- register + offset
     #     o.aRno -- register + offset deferred
     setattr(o, name, o(reg, False, False, False, False, reg))
-    setattr(o, "a" + name, o(reg, True, False, False, False, 010 | reg))
-    setattr(o, name + "i", o(reg, False, True, False, not doindir, 020 | reg))
-    setattr(o, "a" + name + "i", o(reg, True, True, False, not doindir, 030 | reg))
+    setattr(o, "a" + name, o(reg, True, False, False, False, 0o10 | reg))
+    setattr(o, name + "i", o(reg, False, True, False, not doindir, 0o20 | reg))
+    setattr(o, "a" + name + "i", o(reg, True, True, False, not doindir, 0o30 | reg))
     if doindir :
         # PC auto-decrement not supported
-        setattr(o, "p" + name, o(reg, False, False, True, False, 040 | reg))
-        setattr(o, "ap" + name, o(reg, True, False, True, False, 050 | reg))
+        setattr(o, "p" + name, o(reg, False, False, True, False, 0o40 | reg))
+        setattr(o, "ap" + name, o(reg, True, False, True, False, 0o50 | reg))
     #end if
-    setattr(o, name + "o", o(reg, False, False, False, True, 060 | reg))
-    setattr(o, "a" + name + "o", o(reg, True, False, False, True, 070 | reg))
+    setattr(o, name + "o", o(reg, False, False, False, True, 0o60 | reg))
+    setattr(o, "a" + name + "o", o(reg, True, False, False, True, 0o70 | reg))
 #end for
-setattr(o, "i", o(7, False, True, False, True, 027)) # for immediate addressing
-setattr(o, "a", o(7, True, True, False, True, 037)) # for absolute addressing
+setattr(o, "i", o(7, False, True, False, True, 0o27)) # for immediate addressing
+setattr(o, "a", o(7, True, True, False, True, 0o37)) # for absolute addressing
 # immediate operands handled specially
 del reg, doindir
 
@@ -108,7 +108,7 @@ class op(object) :
     @staticmethod
     def regonly(opnd, offset) :
         # validates a register-only operand.
-        assert (opnd.bitpat & 070) == 0, "register operand only"
+        assert (opnd.bitpat & 0o70) == 0, "register operand only"
         return (opnd.reg << offset, 0)
     #end regonly
 
@@ -249,121 +249,121 @@ for \
         name, bitpat \
     in \
         (
-            ("CLR", 0005000),
-            ("COM", 0005100),
-            ("INC", 0005200),
-            ("DEC", 0005300),
-            ("NEG", 0005400),
-            ("ADC", 0005500),
-            ("SBC", 0005600),
-            ("TST", 0005700),
-            ("ROR", 0006000),
-            ("ROL", 0006100),
-            ("ASR", 0006200),
-            ("ASL", 0006300),
+            ("CLR", 0o005000),
+            ("COM", 0o005100),
+            ("INC", 0o005200),
+            ("DEC", 0o005300),
+            ("NEG", 0o005400),
+            ("ADC", 0o005500),
+            ("SBC", 0o005600),
+            ("TST", 0o005700),
+            ("ROR", 0o006000),
+            ("ROL", 0o006100),
+            ("ASR", 0o006200),
+            ("ASL", 0o006300),
         ) \
 :
     setattr(op, name, op(bitpat, 1, 1, op.singleoperand))
-    setattr(op, name + "B", op(bitpat | 0100000, 1, 1, op.singleoperand))
+    setattr(op, name + "B", op(bitpat | 0o100000, 1, 1, op.singleoperand))
 #end for
-setattr(op, "SWAB", op(000300, 1, 1, op.singleoperand))
-setattr(op, "SXT", op(0006700, 1, 1, op.singleoperand))
+setattr(op, "SWAB", op(0o00300, 1, 1, op.singleoperand))
+setattr(op, "SXT", op(0o006700, 1, 1, op.singleoperand))
 for \
         name, bitpat \
     in \
         (
-            ("MOV", 010000),
-            ("CMP", 020000),
-            ("CMP", 020000),
-            ("BIT", 030000),
-            ("BIC", 040000),
-            ("BIS", 050000),
+            ("MOV", 0o10000),
+            ("CMP", 0o20000),
+            ("CMP", 0o20000),
+            ("BIT", 0o30000),
+            ("BIC", 0o40000),
+            ("BIS", 0o50000),
         ) \
 :
     setattr(op, name, op(bitpat, 2, 3, op.doubleoperand))
-    setattr(op, name + "B", op(bitpat | 0100000, 2, 3, op.doubleoperand))
+    setattr(op, name + "B", op(bitpat | 0o100000, 2, 3, op.doubleoperand))
 #end for
-setattr(op, "ADD", op(0060000, 2, 3, op.doubleoperand))
-setattr(op, "SUB", op(0160000, 2, 3, op.doubleoperand))
+setattr(op, "ADD", op(0o060000, 2, 3, op.doubleoperand))
+setattr(op, "SUB", op(0o160000, 2, 3, op.doubleoperand))
 for \
         name, bitpat \
     in \
         (
-            ("MUL", 070000),
-            ("DIV", 071000),
-            ("ASH", 072000),
-            ("ASHC", 073000),
+            ("MUL", 0o70000),
+            ("DIV", 0o71000),
+            ("ASH", 0o72000),
+            ("ASHC", 0o73000),
         ) \
 :
     setattr(op, name, op(bitpat, 2, 3, op.opandreg))
 #end for
-setattr(op, "XOR", op(074000, 2, 3, op.regandop))
+setattr(op, "XOR", op(0o74000, 2, 3, op.regandop))
 for \
         name, bitpat \
     in \
         (
-            ("BR", 0000400),
-            ("BNE", 0001000),
-            ("BEQ", 0001400),
-            ("BPL", 0100000),
-            ("BMI", 0100400),
-            ("BVC", 0102000),
-            ("BVS", 0102400),
-            ("BCC", 0103000),
-            ("BCS", 0103400),
-            ("BGE", 0002000),
-            ("BLT", 0002400),
-            ("BGT", 003000),
-            ("BLE", 003400),
-            ("BHI", 0101000),
-            ("BLOS", 0101400),
-            ("BHIS", 0103000),
-            ("BLO", 0103400),
+            ("BR", 0o000400),
+            ("BNE", 0o001000),
+            ("BEQ", 0o001400),
+            ("BPL", 0o100000),
+            ("BMI", 0o100400),
+            ("BVC", 0o102000),
+            ("BVS", 0o102400),
+            ("BCC", 0o103000),
+            ("BCS", 0o103400),
+            ("BGE", 0o002000),
+            ("BLT", 0o002400),
+            ("BGT", 0o03000),
+            ("BLE", 0o03400),
+            ("BHI", 0o101000),
+            ("BLOS", 0o101400),
+            ("BHIS", 0o103000),
+            ("BLO", 0o103400),
         ) \
 :
     setattr(op, name, op(bitpat, 1, 0, op.branchonly))
 #end for
-setattr(op, "JMP", op(000100, 1, 1, op.singleoperand))
-setattr(op, "JSR", op(004000, 2, 3, op.regandop))
-setattr(op, "RTS", op(000200, 1, 1, op.regoperand))
-setattr(op, "MARK", op(006400, 1, 0, op.markoperand))
-setattr(op, "SOB", op(077000, 2, 0, op.regandbranch))
-setattr(op, "EMT", op(0104000, 1, 0, op.byteoperand))
-setattr(op, "TRAP", op(0104400, 1, 0, op.byteoperand))
-setattr(op, "BPT", op(000003, 0, 0, op.nooperand))
-setattr(op, "IOT", op(000004, 0, 0, op.nooperand))
-setattr(op, "RTI", op(000002, 0, 0, op.nooperand))
-setattr(op, "RTT", op(000006, 0, 0, op.nooperand))
-setattr(op, "SPL", op(000230, 1, 0, op.priooperand))
-setattr(op, "HALT", op(000000, 0, 0, op.nooperand))
-setattr(op, "WAIT", op(000001, 0, 0, op.nooperand))
-setattr(op, "RESET", op(000005, 0, 0, op.nooperand))
+setattr(op, "JMP", op(0o00100, 1, 1, op.singleoperand))
+setattr(op, "JSR", op(0o04000, 2, 3, op.regandop))
+setattr(op, "RTS", op(0o00200, 1, 1, op.regoperand))
+setattr(op, "MARK", op(0o06400, 1, 0, op.markoperand))
+setattr(op, "SOB", op(0o77000, 2, 0, op.regandbranch))
+setattr(op, "EMT", op(0o104000, 1, 0, op.byteoperand))
+setattr(op, "TRAP", op(0o104400, 1, 0, op.byteoperand))
+setattr(op, "BPT", op(0o00003, 0, 0, op.nooperand))
+setattr(op, "IOT", op(0o00004, 0, 0, op.nooperand))
+setattr(op, "RTI", op(0o00002, 0, 0, op.nooperand))
+setattr(op, "RTT", op(0o00006, 0, 0, op.nooperand))
+setattr(op, "SPL", op(0o00230, 1, 0, op.priooperand))
+setattr(op, "HALT", op(0o00000, 0, 0, op.nooperand))
+setattr(op, "WAIT", op(0o00001, 0, 0, op.nooperand))
+setattr(op, "RESET", op(0o00005, 0, 0, op.nooperand))
 for \
         name, bitpat \
     in \
         (
-            ("MFPI", 0006500),
-            ("MTPI", 0006600),
-            ("MFPD", 0106500),
-            ("MTPD", 0106600),
+            ("MFPI", 0o006500),
+            ("MTPI", 0o006600),
+            ("MFPD", 0o106500),
+            ("MTPD", 0o106600),
         ) \
 :
     setattr(op, name, op(bitpat, 1, 1, op.singleoperand))
 #end for
 for name in dir(cc) :
     if name[0] != "_" :
-        setattr(op, "CL" + name, op(000240 | getattr(cc, name), 0, 0, op.nooperand))
-        setattr(op, "SE" + name, op(000260 | getattr(cc, name), 0, 0, op.nooperand))
+        setattr(op, "CL" + name, op(0o00240 | getattr(cc, name), 0, 0, op.nooperand))
+        setattr(op, "SE" + name, op(0o00260 | getattr(cc, name), 0, 0, op.nooperand))
     #end if
 #end for
-setattr(op, "CCC", op(000240, 1, 0, op.condoperand))
-setattr(op, "SCC", op(000260, 1, 0, op.condoperand))
-setattr(op, "NOP", op(000240, 0, 0, op.nooperand))
+setattr(op, "CCC", op(0o00240, 1, 0, op.condoperand))
+setattr(op, "SCC", op(0o00260, 1, 0, op.condoperand))
+setattr(op, "NOP", op(0o00240, 0, 0, op.nooperand))
 # FIS:
-setattr(op, "FADD", op(0750000, 1, 1, op.regoperand))
-setattr(op, "FSUB", op(0750010, 1, 1, op.regoperand))
-setattr(op, "FMUL", op(0750020, 1, 1, op.regoperand))
-setattr(op, "FDIV", op(0750030, 1, 1, op.regoperand))
+setattr(op, "FADD", op(0o750000, 1, 1, op.regoperand))
+setattr(op, "FSUB", op(0o750010, 1, 1, op.regoperand))
+setattr(op, "FMUL", op(0o750020, 1, 1, op.regoperand))
+setattr(op, "FDIV", op(0o750030, 1, 1, op.regoperand))
 del name, bitpat
 # FPP, CIS NYI
 
@@ -449,13 +449,17 @@ class CodeBuffer(object) :
                         if (
                                 otherpsect != self
                             and
+                                otherpsect.minaddr != None
+                            and
+                                otherpsect.maxaddr != None
+                            and
                                 neworigin >= otherpsect.minaddr
                             and
                                 neworigin <= otherpsect.maxaddr
                         ) :
                             raise AssertionError \
                               (
-                                    "psect \"%s\" overlaps \"%s\" at location 0%06o"
+                                    "psect \"%s\" overlaps \"%s\" at location %#06o"
                                 %
                                     (self.name, otherpsect.name, neworigin)
                               )
@@ -483,7 +487,7 @@ class CodeBuffer(object) :
     def label(self, name, resolve_here = False) :
         """defines a label with the specified name, if it doesn't already exist.
         Else returns the existing label with that name."""
-        if not self.labels.has_key(name) :
+        if name not in self.labels :
             self.labels[name] = self.LabelClass(name, self)
         #end if
         if type(resolve_here) in (int, self.LabelClass) :
@@ -575,7 +579,7 @@ class CodeBuffer(object) :
     def psect(self, name) :
         """sets the current program section to the one with the specified name,
         creating it if it doesn't already exist."""
-        if not self.psects.has_key(name) :
+        if name not in self.psects :
             self.psects[name] = self.PsectClass(name, self)
         #end if
         self.curpsect = self.psects[name]
@@ -782,7 +786,7 @@ class CodeBuffer(object) :
         lastaddr = None # no saved even byte
         while True :
             try :
-                (addr, value) = dump.next()
+                (addr, value) = next(dump)
             except StopIteration :
                 addr = None
             #end try
