@@ -4,7 +4,7 @@
 # Written by Lawrence D'Oliveiro <ldo@geek-central.gen.nz>.
 #-
 
-class o(object) :
+class o :
     """container for operand objects."""
 
     def __add__(self, offset) :
@@ -87,7 +87,7 @@ setattr(o, "a", o(7, True, True, False, True, 0o37)) # for absolute addressing
 # immediate operands handled specially
 del reg, doindir
 
-class cc(object) :
+class cc :
     """condition codes flags bits."""
     C = 1
     V = 2
@@ -95,7 +95,7 @@ class cc(object) :
     N = 8
 #end cc
 
-class op(object) :
+class op :
     """container for instruction objects."""
 
     # begin internal operand-validation utilities. Each of these takes an
@@ -367,10 +367,10 @@ setattr(op, "FDIV", op(0o750030, 1, 1, op.regoperand))
 del name, bitpat
 # FPP, CIS NYI
 
-class CodeBuffer(object) :
+class CodeBuffer :
     """overall management of a block of generated code."""
 
-    class LabelClass(object) :
+    class LabelClass :
         """representation of a label within the CodeBuffer."""
 
         # types of label references:
@@ -419,7 +419,7 @@ class CodeBuffer(object) :
 
     #end LabelClass
 
-    class PsectClass(object) :
+    class PsectClass :
         """representation of a program section within the CodeBuffer. Besides
         allowing logical grouping of code and data sections, I also provide
         automatic checking that psects don't run into each other."""
