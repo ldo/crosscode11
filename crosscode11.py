@@ -424,12 +424,13 @@ class CodeBuffer(object) :
 		allowing logical grouping of code and data sections, I also provide
 		automatic checking that psects don't run into each other."""
 
-		def __init__(self, name, parent) :
+		def __init__(self, name, parent, maxalign) :
 			self.name = name
 			self.origin = None # to begin with
 			self.minaddr = None
 			self.maxaddr = None
 			self.parent = parent
+			self.maxalign = maxalign
 		#end __init__
 
 		def setorigin(self, neworigin) :
@@ -572,11 +573,13 @@ class CodeBuffer(object) :
 		return ref
 	#end follow
 
-	def psect(self, name) :
+	def psect(self, name, maxalign = 1) :
 		"""sets the current program section to the one with the specified name,
 		creating it if it doesn't already exist."""
-		if not self.psects.has_key(name) :
-			self.psects[name] = self.PsectClass(name, self)
+		if self.psects.has_key(name) :
+			assert self.psects[name].maxalign >= maxalign, "inconsistent maxalign specified"
+		else :
+			self.psects[name] = self.PsectClass(name, self, maxalign)
 		#end if
 		self.curpsect = self.psects[name]
 		return self # for convenient chaining of calls
@@ -662,6 +665,18 @@ class CodeBuffer(object) :
 		self.curpsect.setorigin((self.curpsect.origin + 2) % 0x10000)
 		return self # for convenient chaining of calls
 	#end w
+
+	def align(self, power = 1) :
+		"""aligns the current origin to an offset from the psect start that
+		is an integer multiple of 2**power. power cannot exceed the maxalign
+		specified when the psect was first defined."""
+		assert self.curpsect.origin != None, "origin not set"
+		assert type(power) == int and power >= 0 and self.curpsect.maxalign >= power, \
+			"alignment larger than allowed for psect"
+		mask = (1 << power) - 1
+		self.curpsect.origin = self.curpsect.origin + mask & ~mask
+		return self # for convenient chaining of calls
+	#end align
 
 	def i(self, opcode, *args) :
 		"""inserts an instruction at the current origin (must be even) and advances it.
