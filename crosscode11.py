@@ -377,7 +377,7 @@ class CodeBuffer(object) :
 		b16a = 0 # 16-bit absolute byte reference
 		b16r = 1 # 16-bit signed relative byte reference
 		w8 = 2 # 8-bit signed relative word reference (branch instr)
-		w6 = 3 # 6-bit negated word referene (sob instr)
+		w6 = 3 # 6-bit negated word reference (sob instr)
 
 		def __init__(self, name, parent) :
 			self.refs = []
