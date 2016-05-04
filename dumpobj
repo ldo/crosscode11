@@ -1,0 +1,176 @@
+#!/usr/bin/python3
+#+
+# This script dumps out RSTS/E/RT-11/RSX .OBJ files.
+#
+# Written by Lawrence D'Oliveiro <ldo@geek-central.gen.nz>.
+#-
+
+import sys
+import os
+import struct
+import getopt
+from crosscode11 import \
+    unrad50
+
+class FBFile :
+    "reads a file with records in formatted-binary."
+
+    def __init__(self, filename) :
+        self.infile = open(filename, "rb")
+    #end __init__
+
+    def readrec(self) :
+        "reads the next record and returns its contents, returning None if" \
+        " the end of the file has been reached."
+        while True :
+            b = self.infile.read(1)
+            if len(b) == 0 :
+                b = None
+                break
+            #end if
+            if ord(b) != 0 :
+                break
+        #end while
+        if b != None :
+            assert ord(b) == 1, "bad formatted-binary start marker"
+            b = self.infile.read(3)
+            assert len(b) == 3, "truncated formatted-binary header"
+            assert b[0] == 0, "bad formatted-binary marker pad"
+            reclen = b[1] | b[2] << 8
+            assert reclen >= 4, "formatted-binary record length too short"
+            data = self.infile.read(reclen - 3) # including checksum byte
+            assert len(data) == reclen - 3, "truncated formatted-binary record"
+            assert sum(b for b in bytes((1, 0)) + b[1:] + data) & 255 == 0, \
+                "bad formatted-binary record checksum"
+            result = data[:-1] # drop checksum byte
+        else :
+            # EOF
+            result = None
+        #end if
+        return \
+            result
+    #end readrec
+
+#end FBFile
+
+gsd_entry_types = \
+    {
+        0 : "Module Name",
+        1 : "Control Section Name",
+        2 : "Internal Symbol Name",
+        3 : "Transfer Address",
+        4 : "Global Symbol Name",
+        5 : "PSECT Name",
+        6 : "Program Version",
+        7 : "Mapped Array Decl",
+    }
+
+gsd_global_sym_flags = \
+    {
+        0 : ("strong", "weak"),
+        3 : ("ref", "def"),
+        5 : ("abs", "rel"),
+    }
+
+gsd_psect_name_flags = \
+    {
+        0 : ("local/global", "root"),
+        2 : ("con", "ovr"),
+        4 : ("r/w", "ro"),
+        5 : ("abs", "rel"),
+        6 : ("local", "global"),
+        7 : ("instr", "data"),
+    }
+
+def decode_flags(flags, names) :
+    decode = []
+    for i in range(8) :
+        if i in names :
+            decode.append(names[i][1 << i & flags != 0])
+        elif 1 << i & flags != 0 :
+            decode.append("?%d" % i)
+        #end if
+    #end for
+    return \
+        ", ".join(decode)
+#end decode_flags
+
+#+
+# Mainline
+#-
+
+opts, args = getopt.getopt \
+  (
+    sys.argv[1:],
+    "",
+    []
+  )
+if len(args) != 1 :
+    raise getopt.GetoptError("need exactly one arg, the name of the .OBJ file to dump")
+#end if
+
+infile = FBFile(args[0])
+while True :
+    rec = infile.readrec()
+    if rec == None :
+        break
+    sys.stdout.write("[%d] %s\n" % (len(rec), repr(rec))) # debug
+    rectype = rec[0]
+    sys.stdout.write("rectype %d " % rectype)
+    if rectype == 1 :
+        sys.stdout.write("GSD\n")
+        offset = 2
+        while True :
+            if offset + 8 > len(rec) :
+                if offset < len(rec) :
+                    sys.stdout.write(" incomplete entry (%d remaining)\n" % (len(rec) - offset))
+                #end if
+                break
+            #end if
+            entry = rec[offset : offset + 8]
+            offset += 8
+            name = unrad50(struct.unpack("<HH", entry[:4])).decode()
+            flags = entry[4]
+            entrytype = entry[5]
+            value, = struct.unpack("<H", entry[6:])
+            sys.stdout.write \
+              (
+                  "entry type %(type)d (%(typename)s), flags %(flags)#0.2x (%(flags_decode)s), name “%(name)s”, value %(value)#0.6o\n"
+                %
+                    {
+                        "type" : entrytype,
+                        "typename" : gsd_entry_types.get(entrytype, "?"),
+                        "flags" : flags,
+                        "flags_decode" :
+                            decode_flags
+                              (
+                                flags,
+                                {4 : gsd_global_sym_flags, 5 : gsd_psect_name_flags}
+                                    .get(entrytype, {})
+                              ),
+                        "name" : name,
+                        "value" : value,
+                    }
+              )
+        #end while
+    elif rectype == 2 :
+        sys.stdout.write("ENDGSD\n")
+    elif rectype == 3:
+        sys.stdout.write("TXT\n")
+        if len(rec) >= 4 :
+            sys.stdout.write(" load addr %#0.6o, len %#0.6o\n" % (struct.unpack("<H", rec[2:4])[0], len(rec) - 4))
+        #end if
+    elif rectype == 4 :
+        sys.stdout.write("RLD\n")
+        # more TBD
+    elif rectype == 5 :
+        sys.stdout.write("ISD\n")
+        # further details unspecified
+    elif rectype == 6 :
+        sys.stdout.write("ENDMOD\n")
+    elif rectype == 7 :
+        sys.stdout.write("lib header\n")
+    else :
+        sys.stdout.write("?")
+    #end if
+#end while
