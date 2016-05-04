@@ -11,7 +11,7 @@ from crosscode11 import \
     o, op, \
     dump_simh
 
-c = CodeBuffer()
+c = CodeBuffer(False)
 tto_xcsr = c.label("tto_xcsr", 0o177564)
 tto_xbuf = c.label("tto_xbuf", 0o177566)
 thestr = c.label("thestr")

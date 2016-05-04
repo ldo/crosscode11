@@ -4,6 +4,9 @@
 # Written by Lawrence D'Oliveiro <ldo@geek-central.gen.nz>.
 #-
 
+import enum
+import struct
+
 class o :
     """container for operand objects."""
 
@@ -370,6 +373,127 @@ del name, bitpat
 class CodeBuffer :
     """overall management of a block of generated code."""
 
+    class Memory :
+        """a block of memory contents."""
+
+        def __init__(self) :
+            self.blocks = [[] * 8] # contiguous sequences of defined memory content bytes
+              # length must exactly divide 65536
+            self.baseaddrs = [None] * len(self.blocks)
+              # address corresponding to start of each block
+        #end __init__
+
+        def eb(self, addr) :
+            """returns the byte at the specified adddress."""
+            (index, offset) = divmod(addr, (65536 // len(self.blocks)))
+            if (
+                    self.baseaddrs[index] != None
+                and
+                    addr >= self.baseaddrs[index]
+                and
+                    addr < self.baseaddrs[index] + len(self.blocks[index])
+            ) :
+                result = self.blocks[index][addr - self.baseaddrs[index]]
+            else :
+                result = 0
+            #end if
+            return \
+                result
+        #end eb
+
+        def ew(self, addr) :
+            """returns the word at the specified address (must be even)."""
+            assert (addr & 1) == 0, "address must be even"
+            return self.eb(addr) | self.eb(addr + 1) << 8
+        #end ew
+
+        def db(self, addr, value) :
+            """sets the byte at the specified address to the specified value."""
+            (index, offset) = divmod(addr, (65536 // len(self.blocks)))
+            incr = 256 # increment block sizes by whole multiples of this
+            if self.baseaddrs[index] == None or self.baseaddrs[index] > addr :
+                newaddr = addr // incr * incr
+                if self.baseaddrs[index] == None :
+                    self.baseaddrs[index] = newaddr + incr # just to preallocate first block
+                #end if
+                self.blocks[index][0:0] = [0] * (self.baseaddrs[index] - newaddr)
+                self.baseaddrs[index] = newaddr
+            elif self.baseaddrs[index] + len(self.blocks[index]) <= addr :
+                newlen = ((addr - self.baseaddrs[index]) + incr) // incr * incr
+                self.blocks[index].extend([0] * (newlen - len(self.blocks[index])))
+            #end if
+            self.blocks[index][addr - self.baseaddrs[index]] = value
+            return self # for convenient chaining of calls
+        #end db
+
+        def dw(self, addr, value) :
+            """sets the word at the specified address (must be even) to the specified value."""
+            assert (addr & 1) == 0, "address must be even"
+            return self.db(addr, value & 255).db(addr + 1, value >> 8 & 255)
+        #end dw
+
+        def dumpb(self, start = None, end = None) :
+            """generator which yields a sequence of (addr, value) pairs for nonzero byte
+            values in order of increasing address over the specified range."""
+            for index in range(0, len(self.blocks)) :
+                base = self.baseaddrs[index]
+                block = self.blocks[index]
+                for offset in range(0, len(block)) :
+                    addr = base + offset
+                    value = block[offset]
+                    if (start == None or addr >= start) and (end == None or addr < end) and value != 0 :
+                        yield (addr, value)
+                    #end if
+                #end for
+            #end for
+            raise StopIteration
+        #end dumpb
+
+        def dumpw(self, start = None, end = None) :
+            """generator which yields a sequence of (addr, value) pairs for nonzero word
+            values in order of increasing address over the specified range. start and end
+            must be even."""
+            assert start == None or (start & 1) == 0
+            assert end == None or (end & 1) == 0
+            dump = self.dumpb(start, end)
+            lastaddr = None # no saved even byte
+            while True :
+                try :
+                    (addr, value) = next(dump)
+                except StopIteration :
+                    addr = None
+                #end try
+                if addr != None :
+                    if lastaddr != None :
+                        if addr == lastaddr + 1 :
+                            # lastaddr was even byte, this is odd byte,
+                            # yield combined word
+                            yield (lastaddr, lastvalue | value << 8)
+                            value = None # already yielded
+                        else : # addr > lastaddr + 1
+                            yield (lastaddr, lastvalue) # saved even byte had no odd byte
+                        #end if
+                        lastaddr = None
+                    #end if
+                    if value != None : # not yet yielded
+                        if (addr & 1) != 0 :
+                            yield (addr & ~1, value << 8) # even byte is zero
+                        else :
+                            (lastaddr, lastvalue) = (addr, value)
+                              # hold back even byte in case I see odd byte
+                        #end if
+                    #end if
+                else :
+                    if lastaddr != None :
+                        yield (lastaddr, lastvalue) # saved even byte had no odd byte
+                    #end if
+                    raise StopIteration
+                #end if
+            #end while
+        #end dumpw
+
+    #end Memory
+
     class LabelClass :
         """representation of a label within the CodeBuffer."""
 
@@ -379,11 +503,17 @@ class CodeBuffer :
         w8 = 2 # 8-bit signed relative word reference (branch instr)
         w6 = 3 # 6-bit negated word reference (sob instr)
 
-        def __init__(self, name, parent) :
+        def __init__(self, name, parent, psect, globlabel, extlabel, weak) :
             self.refs = []
             self.name = name
-            self.value = None # to begin with
+            self.value = (None, 0)[extlabel] # to begin with
             self.parent = parent
+            self.psect = psect
+            self.globlabel = globlabel
+            self.extlabel = extlabel
+            self.weak = weak
+            assert not globlabel or limitsym(name).decode() == name, \
+                "globlabel name out of symbol range"
         #end __init__
 
         def resolve(self, value = None) :
@@ -415,7 +545,14 @@ class CodeBuffer :
 
         __radd__ = __add__
 
-        # note no __sub__ or __rsub__
+        def __sub__(self, other) :
+            if type(other) == self.parent.LabelClass and other.psect == self.psect and self.resolved() and other.resolved() :
+                # handling unresolved cases NYI
+                return self.value - other.value
+            else :
+                return NotImplemented
+            #end if
+        #end __sub__
 
     #end LabelClass
 
@@ -424,12 +561,50 @@ class CodeBuffer :
         allowing logical grouping of code and data sections, I also provide
         automatic checking that psects don't run into each other."""
 
-        def __init__(self, name, parent) :
+        known_attrs = \
+            { # mapping from psect attribute name to my object attribute and attribute value
+                "i" : ("data", False),
+                "d" : ("data", True),
+                "lcl" : ("gbl", False),
+                "gbl" : ("gbl", True),
+                "abs" : ("rel", False),
+                "rel" : ("rel", True),
+                "con" : ("overlay", False),
+                "ovr" : ("overlay", True),
+            }
+
+        def __init__(self, name, parent, attrs) :
             self.name = name
             self.origin = None # to begin with
             self.minaddr = None
             self.maxaddr = None
             self.parent = parent
+            if parent.rel :
+                assert limitsym(name).decode() == name, "psect name out of symbol range"
+                self.mem = self.parent.Memory()
+                self.labelrefs = []
+                # defaults
+                self.origin = 0
+                self.data = False
+                self.gbl = False
+                self.rel = True
+                self.overlay = False
+            else :
+                self.mem = self.parent.mem
+                self.rel = False
+            #end if
+            if attrs != None :
+                if not parent.rel :
+                    raise AssertionError("psect attributes only allowed in relocatable CodeBuffer")
+                #end if
+                for attr in attrs :
+                    if attr not in self.known_attrs :
+                        raise AssertionError("unrecognized psect attribute “%s”" % attr)
+                    #end if
+                    entry = attrs[attr]
+                    setattr(self, entry[0], entry[1])
+                #end for
+            #end if
         #end __init__
 
         def setorigin(self, neworigin) :
@@ -444,10 +619,12 @@ class CodeBuffer :
                     self.maxaddr = neworigin
                     check_overlap = True
                 #end if
-                if check_overlap :
+                if not self.rel and check_overlap :
                     for otherpsect in self.parent.psects.values() :
                         if (
                                 otherpsect != self
+                            and
+                                not otherpsect.rel
                             and
                                 otherpsect.minaddr != None
                             and
@@ -473,22 +650,26 @@ class CodeBuffer :
 
     #end PsectClass
 
-    def __init__(self) :
-        self.blocks = [[] * 8] # contiguous sequences of defined memory content bytes
-          # length must exactly divide 65536
-        self.baseaddrs = [None] * len(self.blocks)
-          # address corresponding to start of each block
+    def __init__(self, rel) :
         self.labels = {}
         self.psects = {}
-        self.psect("") # initial default psect
+        self.rel = rel
+        if not rel :
+            self.mem = self.Memory()
+            self.psect("") # initial default psect
+        #end if
         self.startaddr = None
     #end __init__
 
-    def label(self, name, resolve_here = False) :
+    def label(self, name, resolve_here = False, globlabel = False) :
         """defines a label with the specified name, if it doesn't already exist.
         Else returns the existing label with that name."""
+        assert globlabel <= self.rel, "global labels only allowed in relocatable CodeBuffer"
         if name not in self.labels :
-            self.labels[name] = self.LabelClass(name, self)
+            self.labels[name] = self.LabelClass(name, self, (None, self.curpsect)[self.rel], globlabel, False, False)
+        else :
+            assert self.labels[name].globlabel == globlabel and self.labels[name].extlabel == False, \
+                "inconsistent label attributes"
         #end if
         if type(resolve_here) in (int, self.LabelClass) :
             self.resolve(self.labels[name], resolve_here)
@@ -497,6 +678,18 @@ class CodeBuffer :
         #end if
         return self.labels[name]
     #end label
+
+    def extlabel(self, name, weak = False) :
+        """declares a label which is not defined in this CodeBuffer, but
+        needs to be resolved in a separate linking stage."""
+        if name not in self.labels :
+            self.labels[name] = self.LabelClass(name, self, self.curpsect, True, True, weak)
+        else :
+            assert self.labels[name].globlabel and self.labels[name].extlabel, \
+                "inconsistent extlabel attributes"
+        #end if
+        return self.labels[name]
+    #end extlabel
 
     def _fixup(self, label, addr, reftype) :
         # common internal routine for actually fixing up a label reference.
@@ -528,20 +721,35 @@ class CodeBuffer :
         before or after the label is resolved."""
         addr = self.follow(addr)
         assert reftype in \
-            (self.LabelClass.b16a, self.LabelClass.b16r, self.LabelClass.w8, self.LabelClass.w6)
+            (
+                (self.LabelClass.b16a, self.LabelClass.b16r)
+            +
+                (
+                    (self.LabelClass.w8, self.LabelClass.w6),
+                    (),
+                )[label.extlabel]
+            )
+        if label.value == None or self.rel :
+            # if self.rel and (label.extlabel or label.psect != self.curpsect)  :
+            # need to do internal relocations as well
+            if self.rel :
+                # FIXME: need to distinguish labels that get relocated from those that don’t
+                self.curpsect.labelrefs.append((label, addr, reftype))
+            #end if
+            label.refs.append((addr, reftype)) # for later resolution/relocation
+        #end if
         if label.value != None :
             # resolve straight away
             self._fixup(label, addr, reftype)
-        else :
-            label.refs.append((addr, reftype)) # for later resolution
         #end if
         return self # for convenient chaining of calls
     #end refer
 
     def resolve(self, label, value = None) :
         """marks the label as resolved to the specified address, or the current
-        origin if None. Must be called exactly once per label."""
+        origin if None. Must be called exactly once per non-external label."""
         assert label.value == None # not already resolved
+        assert not label.extlabel, "external symbol not supposed to be defined here"
         if value == None :
             value = self.curpsect.origin
         else :
@@ -552,7 +760,6 @@ class CodeBuffer :
         for addr, reftype in label.refs :
             self._fixup(label, addr, reftype)
         #end for
-        label.refs = []
         return self # for convenient chaining of calls
     #end resolve
 
@@ -563,7 +770,7 @@ class CodeBuffer :
         # pointing to address atloc of type reftype for fixing up later when the
         # label is resolved.
         if type(ref) == self.LabelClass :
-            if ref.value == None and atloc != None :
+            if ref.value == None and atloc != None or ref.extlabel :
                 self.refer(ref, atloc, reftype)
                 ref = 0 # dummy value, filled in later
             else :
@@ -576,66 +783,39 @@ class CodeBuffer :
         return ref
     #end follow
 
-    def psect(self, name) :
+    def psect(self, name, attrs = None) :
         """sets the current program section to the one with the specified name,
         creating it if it doesn't already exist."""
         if name not in self.psects :
-            self.psects[name] = self.PsectClass(name, self)
+            self.psects[name] = self.PsectClass(name, self, attrs)
         #end if
         self.curpsect = self.psects[name]
+        self.mem = self.curpsect.mem
         return self # for convenient chaining of calls
     #end psect
 
     def eb(self, addr) :
         """returns the byte at the specified adddress."""
-        addr = self.follow(addr)
-        (index, offset) = divmod(addr, (65536 // len(self.blocks)))
-        if (
-                self.baseaddrs[index] != None
-            and
-                addr >= self.baseaddrs[index]
-            and
-                addr < self.baseaddrs[index] + len(self.blocks[index])
-        ) :
-            result = self.blocks[index][addr - self.baseaddrs[index]]
-        else :
-            result = 0
-        #end if
-        return result
+        return \
+            self.mem.eb(self.follow(addr))
     #end eb
 
     def ew(self, addr) :
         """returns the word at the specified address (must be even)."""
-        addr = self.follow(addr)
-        assert (addr & 1) == 0, "address must be even"
-        return self.eb(addr) | self.eb(addr + 1) << 8
+        return \
+            self.mem.ew(self.follow(addr))
     #end ew
 
     def db(self, addr, value) :
         """sets the byte at the specified address to the specified value."""
-        addr = self.follow(addr)
-        (index, offset) = divmod(addr, (65536 // len(self.blocks)))
-        incr = 256 # increment block sizes by whole multiples of this
-        if self.baseaddrs[index] == None or self.baseaddrs[index] > addr :
-            newaddr = addr // incr * incr
-            if self.baseaddrs[index] == None :
-                self.baseaddrs[index] = newaddr + incr # just to preallocate first block
-            #end if
-            self.blocks[index][0:0] = [0] * (self.baseaddrs[index] - newaddr)
-            self.baseaddrs[index] = newaddr
-        elif self.baseaddrs[index] + len(self.blocks[index]) <= addr :
-            newlen = ((addr - self.baseaddrs[index]) + incr) // incr * incr
-            self.blocks[index].extend([0] * (newlen - len(self.blocks[index])))
-        #end if
-        self.blocks[index][addr - self.baseaddrs[index]] = value
+        self.mem.db(self.follow(addr), value)
         return self # for convenient chaining of calls
     #end db
 
     def dw(self, addr, value) :
         """sets the word at the specified address (must be even) to the specified value."""
-        addr = self.follow(addr)
-        assert (addr & 1) == 0, "address must be even"
-        return self.db(addr, value & 255).db(addr + 1, value >> 8 & 255)
+        self.mem.dw(self.follow(addr), value)
+        return self # for convenient chaining of calls
     #end dw
 
     def org(self, addr) :
@@ -755,68 +935,29 @@ class CodeBuffer :
         """sets the start-address of the program. This is purely informational
         as far as ths CodeBuffer class is concerned."""
         assert self.startaddr == None
-        self.startaddr = self.follow(startaddr)
+        if self.rel :
+            assert type(startaddr) == self.LabelClass, "relocatable start address must be a label"
+            assert not startaddr.extlabel, "start address must not be external symbol"
+            self.startaddr = startaddr
+        else :
+            self.startaddr = self.follow(startaddr)
+        #end if
         return self # for convenient chaining of calls
     #end start
 
     def dumpb(self, start = None, end = None) :
         """generator which yields a sequence of (addr, value) pairs for nonzero byte
         values in order of increasing address over the specified range."""
-        for index in range(0, len(self.blocks)) :
-            base = self.baseaddrs[index]
-            block = self.blocks[index]
-            for offset in range(0, len(block)) :
-                addr = base + offset
-                value = block[offset]
-                if (start == None or addr >= start) and (end == None or addr < end) and value != 0 :
-                    yield (addr, value)
-                #end if
-            #end for
-        #end for
-        raise StopIteration
+        return \
+            self.mem.dumpb(start, end)
     #end dumpb
 
     def dumpw(self, start = None, end = None) :
         """generator which yields a sequence of (addr, value) pairs for nonzero word
         values in order of increasing address over the specified range. start and end
         must be even."""
-        assert start == None or (start & 1) == 0
-        assert end == None or (end & 1) == 0
-        dump = self.dumpb(start, end)
-        lastaddr = None # no saved even byte
-        while True :
-            try :
-                (addr, value) = next(dump)
-            except StopIteration :
-                addr = None
-            #end try
-            if addr != None :
-                if lastaddr != None :
-                    if addr == lastaddr + 1 :
-                        # lastaddr was even byte, this is odd byte,
-                        # yield combined word
-                        yield (lastaddr, lastvalue | value << 8)
-                        value = None # already yielded
-                    else : # addr > lastaddr + 1
-                        yield (lastaddr, lastvalue) # saved even byte had no odd byte
-                    #end if
-                    lastaddr = None
-                #end if
-                if value != None : # not yet yielded
-                    if (addr & 1) != 0 :
-                        yield (addr & ~1, value << 8) # even byte is zero
-                    else :
-                        (lastaddr, lastvalue) = (addr, value)
-                          # hold back even byte in case I see odd byte
-                    #end if
-                #end if
-            else :
-                if lastaddr != None :
-                    yield (lastaddr, lastvalue) # saved even byte had no odd byte
-                #end if
-                raise StopIteration
-            #end if
-        #end while
+        return \
+            self.mem.dumpw(start, end)
     #end dumpw
 
 #end CodeBuffer
@@ -886,12 +1027,20 @@ def unrad50(n) :
         bytes(result)
 #end unrad50
 
+def limitsym(name) :
+    """returns name after applying restrictions for an object symbol name:
+    no more than 6 characters in the radix-50 character set."""
+    return \
+        unrad50(rad50(name))[:6].rstrip(b" ")
+#end limitsym
+
 def gen_pt_boot(buf, memsize, devaddr) :
     """generates the paper tape bootstrap loader code into the appropriate
     absolute addresses in CodeBuffer object buf. memsize is the memory size
     in integer kiB [8 .. 56], and devaddr is the device status register address
     of the paper-tape reader: 0o177560 for the teletype, 0o177550 for the
     high-speed reader."""
+    assert not buf.rel, "can't handle relocatable CodeBuffer"
     base = (memsize * 1024 // 4096 - 1) << 12
     buf.org(base + 0o7744)
     buf.w(0o16701).w(0o00026) # mov xx7776, r1 ; get device status register address
@@ -912,6 +1061,7 @@ def gen_pt_boot(buf, memsize, devaddr) :
 def dump_simh(buf, out) :
     """dumps the contents of CodeBuffer object buf to out as a sequence of
     SIMH memory-deposit commands."""
+    assert not buf.rel, "can't handle relocatable CodeBuffer"
     for addr, value in buf.dumpw(0, 0x10000) :
         out.write("d %4o %4o\n" % (addr, value))
     #end for
@@ -919,3 +1069,222 @@ def dump_simh(buf, out) :
         out.write("g %o\n" % buf.startaddr)
     #end if
 #end dump_simh
+
+@enum.unique
+class OBJFORMAT(enum.Enum) :
+    "formats for object files."
+    FB = 1
+      # “formatted-binary”; RSTS/E PIP can read these from, e.g. paper tape
+      # and convert them to RSX variable-length records with /RMS:FB output
+      # qualifier.
+    VLR = 2
+      # RSX variable-length records. May not be properly readable unless
+      # you can put the right RMS attributes on the file.
+#end OBJFORMAT
+
+abs_psect_name = ". ABS."
+
+def write_obj(format, buf, outname, modulename = None, vername = None) :
+    "writes the contents of CodeBuffer to the file named outname" \
+    " as an .OBJ file in either formatted-binary or variable-length-record" \
+    " formats, depending on format, which must be an OBJFORMAT.xxx value."
+
+    out = None
+    curgsd = []
+    currld = []
+
+    def encodesym(name) :
+        # returns a tuple of 2 integers representing the radix-50 encoded
+        # representation of name (truncated or blank-padded to 6 bytes
+        # as appropriate).
+        return \
+            tuple(rad50(name.encode() + b"     "[:6 - len(name)]))[:2]
+    #end encodesym
+
+    def wrrec_fb(data) :
+        "writes data as formatted-binary record."
+        # is there any limit to the length of data?
+        encoded = struct.pack("<HH", 1, len(data) + 4) + data
+        checksum = sum(-b for b in encoded)
+        out.write(encoded)
+        out.write(bytes((checksum & 255,)))
+    #end wrrec_fb
+
+    def wrrec_vlr(data) :
+        "writes data as a variable-length record."
+        assert len(data) > 0 and len(data) <= 128, "object record mustn’t exceed 128 bytes"
+        out.write(struct.pack("<H", len(data) + 2) + data + bytes((0,))[0:len(data) % 2])
+    #end wrrec_vlr
+
+    wrrec = {OBJFORMAT.FB : wrrec_fb, OBJFORMAT.VLR : wrrec_vlr}[format]
+
+    def flushgsd() :
+        if len(curgsd) != 0 :
+            data = struct.pack("<H", 1)
+            for entry in curgsd :
+                data += struct.pack("<HHBBH", *entry)
+            #end for
+            curgsd[:] = []
+            wrrec(data)
+        #end if
+    #end flushgsd
+
+    def addgsd(name, type, flags, value) :
+        if len(curgsd) == 15 :
+            flushgsd()
+        #end if
+        curgsd.append \
+            (
+                encodesym(name) + (flags, type, value),
+            )
+    #end addgsd
+
+    def endgsd() :
+        flushgsd()
+        wrrec(struct.pack("<H", 2)) # end of GSD
+    #end endgsd
+
+    def flushrld() :
+        if len(currld) != 0 :
+            wrrec(struct.pack("<H" + "H" * len(currld), *([4] + currld)))
+            currld[:] = []
+        #end if
+    #end flushrld
+
+    def addrld(entry) :
+        assert len(entry) < 64
+        if len(currld) + len(entry) >= 64 :
+            flushrld()
+        #end if
+        currld.extend(entry)
+    #end addrld
+
+#begin write_obj
+    out = open(outname, "wb")
+    if modulename != None :
+        addgsd(modulename, 0, 0, 0)
+    #end if
+    if vername != None :
+        addgsd(vername, 6, 0, 0)
+    #end if
+    if buf.rel :
+        for psect in buf.psects.values() :
+            if psect.maxaddr != None :
+                flags = 0
+                for \
+                    attr, flag \
+                in \
+                    ( \
+                        ("data", 7),
+                        ("gbl", 6),
+                        ("rel", 5),
+                        ("overlay", 2),
+                    ) \
+                :
+                    if getattr(psect, attr) :
+                        flags |= 1 << flag
+                    #end if
+                #end for
+                addgsd(psect.name, 5, flags, psect.maxaddr)
+                for label in buf.labels.values() :
+                    if label.globlabel and label.psect == psect :
+                        addgsd \
+                          (
+                            name = label.name,
+                            type = 4,
+                            flags =
+                                    int(label.weak) << 0
+                                |
+                                    int(not label.extlabel) << 3
+                                |
+                                    int(psect.rel) << 5,
+                            value = label.value
+                          )
+                    #end if
+                #end for
+            #end if
+        #end for
+        if buf.startaddr != None :
+            addgsd(buf.startaddr.psect.name, 3, 0, buf.startaddr.value)
+        #end if
+    else :
+        addgsd(abs_psect_name, 5, 0, 0)
+        if buf.startaddr != None :
+            addgsd(abs_psect_name, 3, 0, buf.startaddr)
+        #end if
+    #end if
+    endgsd()
+    last_psect_name = None
+    for psect in ((buf.curpsect,), buf.psects.values())[buf.rel] :
+        psect_name = (abs_psect_name, psect.name)[buf.rel]
+        nextaddr = None
+        startaddr = None
+        lasttxt = []
+        dumper = psect.mem.dumpb()
+        while True :
+            try :
+                addr, value = next(dumper)
+            except StopIteration :
+                addr = None
+            #end try
+            if addr == None or addr != nextaddr or len(lasttxt) == 126 :
+                if len(lasttxt) != 0 :
+                    wrrec(struct.pack("<HH" + "B" * len(lasttxt), *([3, startaddr] + lasttxt))) # text record
+                    if buf.rel :
+                        # output any associated relocations
+                        for label, refaddr, reftype in psect.labelrefs :
+                            assert reftype in (buf.LabelClass.b16a, buf.LabelClass.b16r)
+                            if refaddr >= startaddr and refaddr < addr & ~1 :
+                                offset = psect.mem.ew(refaddr)
+                                if label.psect != psect :
+                                    addrld \
+                                      (
+                                            (
+                                                (
+                                                    (2, 4),
+                                                    (5, 6),
+                                                )[offset != 0][reftype == buf.LabelClass.b16r]
+                                            |
+                                                refaddr - startaddr << 8,
+                                            )
+                                        +
+                                            encodesym(label.name)
+                                        +
+                                            (
+                                                (),
+                                                (offset,),
+                                            )[offset != 0]
+                                      )
+                                else :
+                                    # internal relocation
+                                    # FIXME: need to distinguish labels that get relocated from those that don’t
+                                    addrld((1 | refaddr - startaddr << 8, label.value))
+                                #end if
+                            #end if
+                        #end for
+                    #end if
+                #end if
+                lasttxt = []
+            #end if
+            if addr == None :
+                break
+            if nextaddr != addr :
+              # output location counter definition for following text record(s)
+                if psect_name != last_psect_name :
+                    addrld((7,) + encodesym(psect_name) + (addr,))
+                    last_psect_name = psect_name
+                else :
+                    addrld((8, addr))
+                #end if
+                flushrld()
+                startaddr = addr
+            #end if
+            lasttxt.append(value)
+            nextaddr = addr + 1
+        #end while
+    #end for
+    flushrld()
+    wrrec(struct.pack("<H", 6)) # end of module
+    out.flush()
+    out.close()
+#end write_obj
