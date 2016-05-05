@@ -95,6 +95,41 @@ def decode_flags(flags, names) :
         ", ".join(decode)
 #end decode_flags
 
+class RLDDecoder :
+    "decode function must always return a string."
+
+    def __init__(self, name, size, decode) :
+        self.name = name
+        self.size = size
+        self.decode = decode
+    #end __init__
+
+#end RLDDecoder
+rld_decode_name = RLDDecoder("name", 4, lambda b : "“%s”" % unrad50(struct.unpack("<HH", b)).decode())
+rld_decode_constant = RLDDecoder("const", 2, lambda b : "%#0.6o" % struct.unpack("<H", b)[0])
+
+name = (rld_decode_name,)
+const = (rld_decode_constant,)
+name_and_const = (rld_decode_name, rld_decode_constant)
+rld_entry_types = \
+    {
+        1 : {"name" : "internal", "decode" : const},
+        2 : {"name" : "global", "decode" : name},
+        3 : {"name" : "internal displaced", "decode" : const},
+        4 : {"name" : "global displaced", "decode" : name},
+        5 : {"name" : "global additive", "decode" : name_and_const},
+        6 : {"name" : "global additive displaced", "decode" : name_and_const},
+        7 : {"name" : "location counter def", "decode" : name_and_const},
+        8 : {"name" : "location counter modify", "decode" : const},
+        9 : {"name" : "program limits", "decode" : ()},
+        10 : {"name" : "psect", "decode" : name},
+        11 : {"name" : "psect displaced", "decode" : name},
+        12 : {"name" : "psect additive", "decode" : name_and_const},
+        13 : {"name" : "psect additive displaced", "decode" : name_and_const},
+        # TBD 14 -- complex
+    }
+del name, const, name_and_const
+
 #+
 # Mainline
 #-
@@ -162,7 +197,50 @@ while True :
         #end if
     elif rectype == 4 :
         sys.stdout.write("RLD\n")
-        # more TBD
+        offset = 2
+        while True :
+            if offset + 2 > len(rec) :
+                if offset < len(rec) :
+                    sys.stdout.write(" incomplete entry (%d remaining)\n" % (len(rec) - offset))
+                #end if
+                break
+            #end if
+            command = rec[offset]
+            wordflag = command & 128 != 0
+            command &= 127
+            disp = rec[offset + 1]
+            if command in rld_entry_types :
+                offset += 2
+                rld_entry = rld_entry_types[command]
+                sys.stdout.write \
+                  (
+                        " %d %s (%s) at %d:"
+                    %
+                        (command, rld_entry["name"], ("byte", "word")[wordflag], disp)
+                  )
+                entry_size = sum(e.size for e in rld_entry["decode"])
+                if offset + entry_size > len(rec) :
+                    raise IndexError \
+                      (
+                            "truncated RLD entry type %d at offset %d (need %d bytes, only %d remaining)"
+                        %
+                            (command, offset, entry_size, len(rec) - offset)
+                      )
+                #end if
+                first = True
+                for e in rld_entry["decode"] :
+                    if not first :
+                        sys.stdout.write(", ")
+                    #end if
+                    sys.stdout.write(" %s: %s" % (e.name, e.decode(rec[offset : offset + e.size])))
+                    offset += e.size
+                    first = False
+                #end for
+                sys.stdout.write("\n")
+            else :
+                raise KeyError("unrecognized RLD entry type %d at offset %d" % (command, offset))
+            #end if
+        #end while
     elif rectype == 5 :
         sys.stdout.write("ISD\n")
         # further details unspecified
