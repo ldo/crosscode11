@@ -123,10 +123,12 @@ rld_entry_types = \
         8 : {"name" : "location counter modify", "decode" : const},
         9 : {"name" : "program limits", "decode" : ()},
         10 : {"name" : "psect", "decode" : name},
-        11 : {"name" : "psect displaced", "decode" : name},
-        12 : {"name" : "psect additive", "decode" : name_and_const},
-        13 : {"name" : "psect additive displaced", "decode" : name_and_const},
-        # TBD 14 -- complex
+        # 11 -- not used
+        12 : {"name" : "psect displaced", "decode" : name},
+        13 : {"name" : "psect additive", "decode" : name_and_const},
+        14 : {"name" : "psect additive displaced", "decode" : name_and_const},
+        15 : {"name" : "complex", "decode" : None}, # special case
+        # TBD 16 -- complex
     }
 del name, const, name_and_const
 
@@ -206,7 +208,7 @@ while True :
                 break
             #end if
             command = rec[offset]
-            wordflag = command & 128 != 0
+            byteflag = command & 128 != 0
             command &= 127
             disp = rec[offset + 1]
             if command in rld_entry_types :
@@ -216,7 +218,7 @@ while True :
                   (
                         " %d %s (%s) at %d:"
                     %
-                        (command, rld_entry["name"], ("byte", "word")[wordflag], disp)
+                        (command, rld_entry["name"], ("word", "byte")[byteflag], disp)
                   )
                 entry_size = sum(e.size for e in rld_entry["decode"])
                 if offset + entry_size > len(rec) :
