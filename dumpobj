@@ -128,7 +128,27 @@ rld_entry_types = \
         13 : {"name" : "psect additive", "decode" : name_and_const},
         14 : {"name" : "psect additive displaced", "decode" : name_and_const},
         15 : {"name" : "complex", "decode" : None}, # special case
-        # TBD 16 -- complex
+    }
+
+rld_decode_section = RLDDecoder("section", 1, lambda b : "%d" % struct.unpack("<B", b)[0])
+rld_decode_offset = RLDDecoder("offset", 2, lambda b : "%#0.6o" % struct.unpack("<H", b)[0])
+rld_complex_ops = \
+    {
+        0 : {"name" : "nop"},
+        1 : {"name" : "add"},
+        2 : {"name" : "sub"},
+        3 : {"name" : "mul"},
+        4 : {"name" : "div"},
+        5 : {"name" : "and"},
+        6 : {"name" : "or"},
+        7 : {"name" : "xor"},
+        8 : {"name" : "neg"},
+        9 : {"name" : "not"},
+        10 : {"name" : "store", "stop" : True},
+        11 : {"name" : "store displaced", "stop" : True},
+        14 : {"name" : "fetch global", "operands" : name},
+        15 : {"name" : "fetch relocatable value", "operands" : (rld_decode_section, rld_decode_offset)},
+        16 : {"name" : "fetch const", "operands" : const},
     }
 del name, const, name_and_const
 
@@ -216,28 +236,74 @@ while True :
                 rld_entry = rld_entry_types[command]
                 sys.stdout.write \
                   (
-                        " %d %s (%s) at %d:"
+                        " %d %s (%s) at %d: "
                     %
                         (command, rld_entry["name"], ("word", "byte")[byteflag], disp)
                   )
-                entry_size = sum(e.size for e in rld_entry["decode"])
-                if offset + entry_size > len(rec) :
-                    raise IndexError \
-                      (
-                            "truncated RLD entry type %d at offset %d (need %d bytes, only %d remaining)"
-                        %
-                            (command, offset, entry_size, len(rec) - offset)
-                      )
-                #end if
-                first = True
-                for e in rld_entry["decode"] :
-                    if not first :
-                        sys.stdout.write(", ")
+                if rld_entry["decode"] != None :
+                    entry_size = sum(e.size for e in rld_entry["decode"])
+                    if offset + entry_size > len(rec) :
+                        raise IndexError \
+                          (
+                                "truncated RLD entry type %d at offset %d (need %d bytes, only %d remaining)"
+                            %
+                                (command, offset, entry_size, len(rec) - offset)
+                          )
                     #end if
-                    sys.stdout.write(" %s: %s" % (e.name, e.decode(rec[offset : offset + e.size])))
-                    offset += e.size
-                    first = False
-                #end for
+                    first = True
+                    for e in rld_entry["decode"] :
+                        if not first :
+                            sys.stdout.write(", ")
+                        #end if
+                        sys.stdout.write(" %s: %s" % (e.name, e.decode(rec[offset : offset + e.size])))
+                        offset += e.size
+                        first = False
+                    #end for
+                else :
+                    first = True
+                    while True :
+                        if offset == len(rec) :
+                            raise IndexError("unterminated complex relocation at offset %d" % offset)
+                        #end if
+                        op = rec[offset]
+                        if op not in rld_complex_ops :
+                            raise KeyError("unrecognized complex op %d at offset %d" % (op, offset))
+                        #end if
+                        offset += 1
+                        rld_entry = rld_complex_ops[op]
+                        entry_size = sum(e.size for e in rld_entry.get("operands", ()))
+                        if offset + entry_size > len(rec) :
+                            raise IndexError \
+                              (
+                                    "truncated RLD complex entry op %d at offset %d (need %d bytes, only %d remaining)"
+                                %
+                                    (op, offset, entry_size, len(rec) - offset)
+                              )
+                        #end if
+                        if not first :
+                            sys.stdout.write(", ")
+                        #end if
+                        sys.stdout.write("%d %s" % (op, rld_entry["name"]))
+                        if entry_size != 0 :
+                            sys.stdout.write("(")
+                            first = True
+                            for e in rld_entry["operands"] :
+                                if not first :
+                                    sys.stdout.write(", ")
+                                #end if
+                                sys.stdout.write("%s: %s" % (e.name, e.decode(rec[offset : offset + e.size])))
+                                offset += e.size
+                                first = False
+                            #end for
+                            sys.stdout.write(")")
+                        #end if
+                        if rld_entry.get("stop", False) :
+                            sys.stdout.write(".")
+                            break
+                        #end if
+                        first = False
+                    #end while
+                #end if
                 sys.stdout.write("\n")
             else :
                 raise KeyError("unrecognized RLD entry type %d at offset %d" % (command, offset))
