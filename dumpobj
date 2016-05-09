@@ -130,7 +130,19 @@ rld_entry_types = \
         15 : {"name" : "complex", "decode" : None}, # special case
     }
 
-rld_decode_section = RLDDecoder("section", 1, lambda b : "%d" % struct.unpack("<B", b)[0])
+psects_by_index = []
+def decode_section(b) :
+    section_index = struct.unpack("<B", b)[0]
+    if section_index >= 1 and section_index <= len(psects_by_index) :
+        section_name = "“%s”" % psects_by_index[section_index - 1]
+    else :
+        section_name = "?"
+    #end if
+    return \
+        "%d (%s)" % (section_index, section_name)
+#end decode_section
+
+rld_decode_section = RLDDecoder("section", 1, decode_section)
 rld_decode_offset = RLDDecoder("offset", 2, lambda b : "%#0.6o" % struct.unpack("<H", b)[0])
 rld_complex_ops = \
     {
@@ -209,6 +221,9 @@ while True :
                         "value" : value,
                     }
               )
+            if entrytype == 5 :
+                psects_by_index.append(name)
+            #end if
         #end while
     elif rectype == 2 :
         sys.stdout.write("ENDGSD\n")
@@ -231,6 +246,8 @@ while True :
             byteflag = command & 128 != 0
             command &= 127
             disp = rec[offset + 1]
+              # Note that this is 4 greater than actual offset into preceding TXT
+              # data.
             if command in rld_entry_types :
                 offset += 2
                 rld_entry = rld_entry_types[command]
