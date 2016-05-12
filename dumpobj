@@ -250,7 +250,7 @@ while True :
                     sys.stdout.write(" %#0.6o" % (rec[2 * i] | rec[2 * i + 1] << 8))
                 #end for
                 if len(rec) % 2 != 0 :
-                    sys.stdout.write(" %#0.6o" % rec[-1])
+                    sys.stdout.write(" %#0.3o" % rec[-1])
                 #end if
                 sys.stdout.write("\n")
             else :
