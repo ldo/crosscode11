@@ -239,6 +239,23 @@ while True :
         sys.stdout.write("TXT\n")
         if len(rec) >= 4 :
             sys.stdout.write(" load addr %#0.6o, len %#0.6o\n" % (struct.unpack("<H", rec[2:4])[0], len(rec) - 4))
+            if len(rec) > 4 :
+                sys.stdout.write(" bytes:")
+                for i in range(4, len(rec)) :
+                    sys.stdout.write(" %#0.2x" % rec[i])
+                #end for
+                sys.stdout.write("\n")
+                sys.stdout.write(" words:")
+                for i in range(2, len(rec) // 2) :
+                    sys.stdout.write(" %#0.6o" % (rec[2 * i] | rec[2 * i + 1] << 8))
+                #end for
+                if len(rec) % 2 != 0 :
+                    sys.stdout.write(" %#0.6o" % rec[-1])
+                #end if
+                sys.stdout.write("\n")
+            else :
+                sys.stdout.write(" (empty)\n")
+            #end if
         #end if
     elif rectype == 4 :
         sys.stdout.write("RLD\n")
