@@ -133,7 +133,7 @@ class op :
     @staticmethod
     def branchonly(bitpat, opnd) :
         # destination for branch instruction
-        assert type(opnd) == int, "branch offset must be integer"
+        assert isinstance(opnd, int), "branch offset must be integer"
         assert opnd >= -128 and opnd < 128, "branch offset outside valid range"
         return (bitpat | (opnd & 255), 0)
     #end branchonly
@@ -142,7 +142,7 @@ class op :
     def regandbranch(bitpat, opnd1, opnd2) :
         # operands for SOB instruction
         operand1 = op.regonly(opnd1, 6)
-        assert type(opnd2) == int, "operand2 must be integer"
+        assert isinstance(opnd2, int), "operand2 must be integer"
         assert opnd2 >= 0 and opnd2 < 64, "branch offset outside valid range"
         return (bitpat | operand1[0] | (opnd & 63), operand1[1])
     #end regandbranch
@@ -150,7 +150,7 @@ class op :
     @staticmethod
     def byteoperand(bitpat, opnd) :
         # literal byte operand for EMT and TRAP instructions
-        assert type(opnd) == int, "operand must be integer"
+        assert isinstance(opnd, int), "operand must be integer"
         assert opnd >= 0 and opnd < 256, "byte operand outside valid range"
         return (bitpat | (opnd & 255), 0)
     #end byteoperand
@@ -158,7 +158,7 @@ class op :
     @staticmethod
     def priooperand(bitpat, opnd) :
         # literal priority for SPL instruction
-        assert type(opnd) == int, "operand must be integer"
+        assert isinstance(opnd, int), "operand must be integer"
         assert opnd >= 0 and opnd < 8, "priority outside valid range"
         return (bitpat | (opnd & 7), 0)
     #end priooperand
@@ -173,7 +173,7 @@ class op :
     @staticmethod
     def markoperand(bitpat, opnd) :
         # literal integer operand for MARK instruction
-        assert type(opnd) == int, "operand must be integer"
+        assert isinstance(opnd, int), "operand must be integer"
         assert opnd >= 0 and opnd < 64, "mark count outside valid range"
         return (bitpat | (opnd & 63), 0)
     #end markoperand
@@ -195,7 +195,7 @@ class op :
     def condoperand(bitpat, opnd = None) :
         # instruction with condition-code operand (defaulting to true if none)
         if opnd != None :
-            assert type(opnd) == int, "operand must be integer"
+            assert isinstance(opnd, int), "operand must be integer"
             assert opnd >= 0 and opnd < 16, "condition flag mask outside valid range"
         else :
             opnd = 15 # default to all flags
@@ -636,7 +636,7 @@ class CodeBuffer :
 
         def __add__(self, reg) :
             """allows convenient r+offset notation."""
-            if type(reg) == o :
+            if isinstance(reg, o) :
                 assert reg.hasoffset, "offset not allowed on this operand"
                 return (reg, self)
             else :
@@ -647,7 +647,7 @@ class CodeBuffer :
         __radd__ = __add__
 
         def __sub__(self, other) :
-            if type(other) == self.parent.LabelClass and other.psect == self.psect and self.resolved() and other.resolved() :
+            if isinstance(other, self.parent.LabelClass) and other.psect == self.psect and self.resolved() and other.resolved() :
                 # handling unresolved cases NYI
                 return self.value - other.value
             else :
@@ -824,15 +824,25 @@ class CodeBuffer :
         Else returns the existing label with that name."""
         assert globlabel <= self.rel, "global labels only allowed in relocatable CodeBuffer"
         if name not in self.labels :
-            self.labels[name] = self.LabelClass(name, self, (None, self.curpsect)[self.rel], globlabel, False, False)
+            self.labels[name] = self.LabelClass \
+              (
+                name = name,
+                parent = self,
+                psect = (None, self.curpsect)[self.rel],
+                globlabel = globlabel,
+                extlabel = False,
+                weak = False,
+              )
         else :
             assert self.labels[name].globlabel == globlabel and self.labels[name].extlabel == False, \
                 "inconsistent label attributes"
         #end if
-        if type(resolve_here) in (int, self.LabelClass) :
+        if isinstance(resolve_here, bool) :
+            if resolve_here :
+                self.resolve(self.labels[name], self.curpsect.origin)
+            #end if
+        elif isinstance(resolve_here, (int, self.LabelClass)) :
             self.resolve(self.labels[name], resolve_here)
-        elif resolve_here :
-            self.resolve(self.labels[name], self.curpsect.origin)
         #end if
         return self.labels[name]
     #end label
@@ -943,7 +953,7 @@ class CodeBuffer :
         # case a dummy value is returned, and a reference to the label is added
         # pointing to address atloc of type reftype for fixing up later when the
         # label is resolved.
-        if type(ref) == self.LabelClass :
+        if isinstance(ref, self.LabelClass) :
             if ref.value == None and atloc != None or ref.extlabel :
                 self.refer(ref, atloc, reftype)
                 ref = 0 # dummy value, filled in later
@@ -1040,7 +1050,7 @@ class CodeBuffer :
 
         def place(val) :
           # returns a dummy integer value in place of val if it is a label.
-            if type(val) == self.LabelClass :
+            if isinstance(val, self.LabelClass) :
                 val = 0
             # else :
                 # assume it's an int
@@ -1054,10 +1064,10 @@ class CodeBuffer :
         extra = []
         refer = []
         for arg in args :
-            if type(arg) == o :
+            if isinstance(arg, o) :
                 opnds.append(arg)
-            elif type(arg) in (tuple, list) :
-                assert len(arg) == 2 and type(arg[0]) == o and arg[0].hasoffset, "invalid arg+offset"
+            elif isinstance(arg, (tuple, list)) :
+                assert len(arg) == 2 and isinstance(arg[0], o) and arg[0].hasoffset, "invalid arg+offset"
                 if arg[0] == o.i :
                     opnds.append(o.PCi)
                 elif arg[0] == o.a :
@@ -1067,10 +1077,10 @@ class CodeBuffer :
                 #end if
                 extra.append(arg[1])
                 refer.append((arg[1], self.dot() + 2 * len(refer) + 2, self.LabelClass.b16a))
-            elif type(arg) in (int, self.LabelClass) :
+            elif isinstance(arg, (int, self.LabelClass)) :
                 if (opcode.genmask & 1 << len(opnds)) != 0 :
                     opnds.append(o.PCo) # PC-relative addressing
-                    if type(arg) == int :
+                    if isinstance(arg, int) :
                         extra.append(arg - self.dot() + 2 * len(refer) - 4)
                     else :
                         extra.append(arg)
@@ -1079,7 +1089,7 @@ class CodeBuffer :
                 else :
                     opnds.append(place(arg))
                     assert len(refer) == 0
-                    if type(arg) == self.LabelClass :
+                    if isinstance(arg, self.LabelClass) :
                         # assume branch or SOB
                         refer.append \
                           (
@@ -1101,7 +1111,7 @@ class CodeBuffer :
             self.w(place(word))
         #end for
         for thisrefer in refer :
-            if type(thisrefer[0]) == self.LabelClass :
+            if isinstance(thisrefer, self.LabelClass) :
                 self.refer(*thisrefer)
             #end if
         #end for
@@ -1113,7 +1123,7 @@ class CodeBuffer :
         as far as ths CodeBuffer class is concerned."""
         assert self.startaddr == None
         if self.rel :
-            assert type(startaddr) == self.LabelClass, "relocatable start address must be a label"
+            assert isinstance(startaddr, self.LabelClass), "relocatable start address must be a label"
             assert not startaddr.extlabel, "start address must not be external symbol"
             self.startaddr = startaddr
         else :
@@ -1146,7 +1156,7 @@ def rad50(s) :
     value. The result will be a list of integers, one for each group of 3
     characters/bytes in s. If its length is not a multiple of 3, the last
     group will be padded on the end with blanks."""
-    if type(s) != bytes :
+    if not isinstance(s, bytes) :
         s = s.encode()
     #end if
     if len(s) % 3 != 0 :
@@ -1189,7 +1199,7 @@ def unrad50(n) :
     """returns the decoding of the radix-50 code(s) in n, which must be
     either an integer or a sequence of integers. Each integer is decoded
     to 3 bytes, and the result will be their concatenation in order."""
-    if type(n) == int :
+    if isinstance(n, int) :
         n = (n,)
     #end if
     result = []
