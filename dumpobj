@@ -168,12 +168,18 @@ del name, const, name_and_const
 # Mainline
 #-
 
+debug = False
 opts, args = getopt.getopt \
   (
     sys.argv[1:],
     "",
-    []
+    ["debug"]
   )
+for keyword, value in opts :
+    if keyword == "--debug" :
+        debug = True
+    #end if
+#end for
 if len(args) != 1 :
     raise getopt.GetoptError("need exactly one arg, the name of the .OBJ file to dump")
 #end if
@@ -183,7 +189,9 @@ while True :
     rec = infile.readrec()
     if rec == None :
         break
-    sys.stdout.write("[%d] %s\n" % (len(rec), repr(rec))) # debug
+    if debug :
+        sys.stdout.write("[%d] %s\n" % (len(rec), repr(rec)))
+    #end if
     rectype = rec[0]
     sys.stdout.write("rectype %d " % rectype)
     if rectype == 1 :
