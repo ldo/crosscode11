@@ -494,8 +494,102 @@ class CodeBuffer :
 
     #end Memory
 
+    class Relocation :
+        "note all relocations operate on entire words."
+
+        __slots__ = \
+            (
+                "psect",
+                "offset",
+                "reltype",
+                "displaced",
+                "name",
+                "constant",
+                "operands",
+            )
+
+        @enum.unique
+        class RELTYPE(enum.Enum) :
+            "relocation types. Note that displaced relocation is indicated by" \
+            " the separate displaced flag."
+            INTERNAL = 1
+            GLOBAL = 2
+            GLOBAL_ADDITIVE = 5
+            PSECT = 10
+            PSECT_ADDITIVE = 13
+            COMPLEX = 15
+        #end RELTYPE
+
+        class ComplexOp :
+
+            __slots__ = \
+                (
+                    "op",
+                    "name",
+                    "constant",
+                )
+
+            @enum.unique
+            class OP(enum.Enum) :
+                "operator types for complex relocation."
+                NOP = 0 # no operands, no result
+                ADD = 1 # 2 operands
+                SUB = 2 # 2 operands
+                MUL = 3 # 2 operands
+                DIV = 4 # 2 operands
+                AND = 5 # 2 operands
+                OR = 6 # 2 operands
+                XOR = 7 # 2 operands
+                NEG = 8 # 1 operand
+                NOT = 9 # 1 operand
+                # store-result is implicit at end of sequence
+                STORE = 10 # 1 operand, no result, terminate
+                STORE_DISP = 11 # 1 operand, no result, terminate
+                FETCH_GLOBAL = 14 # 1 result
+                FETCH_REL = 15 # 1 result
+                FETCH_CONST = 16 # 1 result
+            #end OP
+
+            def __init__(self, op, name = None, constant = None) :
+                assert isinstance(op, self.__class__.OP)
+                self.op = op
+                self.name = name
+                self.constant = constant
+            #end __init__
+
+        #end ComplexOp
+
+        def __init__(self, psect, offset, reltype, displaced, name = None, constant = None, operands = None) :
+            Relocation = self.__class__ # or perhaps CodeBuffer.Relocation
+            assert isinstance(psect, CodeBuffer.PsectClass)
+            self.psect = psect
+            self.offset = offset
+            assert isinstance(reltype, Relocation.RELTYPE)
+            assert isinstance(displaced, bool)
+            assert (reltype == Relocation.RELTYPE.COMPLEX) == (operands != None)
+            assert (reltype == Relocation.RELTYPE.COMPLEX) <= (name == None and constant == None)
+            self.reltype = reltype
+            self.displaced = displaced
+            self.name = name
+            self.constant = constant
+            assert \
+              (
+                    operands == None
+                or
+                    all
+                      (
+                        isinstance(r, Relocation.ComplexOp)
+                        for r in operands
+                      )
+              )
+            self.operands = operands
+        #end __init__
+
+    #end Relocation
+
     class LabelClass :
-        """representation of a label within the CodeBuffer."""
+        "representation of a label within the CodeBuffer. Don’t instantiate directly;" \
+        " get one from CodeBuffer.label or CodeBuffer.extlabel."
 
         # types of label references:
         b16a = 0 # 16-bit absolute byte reference
@@ -515,6 +609,13 @@ class CodeBuffer :
             assert not globlabel or limitsym(name).decode() == name, \
                 "globlabel name out of symbol range"
         #end __init__
+
+        @property
+        def rel(self) :
+            "does this label require link-time relocation."
+            return \
+                self.extlabel or self.psect != None and self.psect.rel
+        #end rel
 
         def resolve(self, value = None) :
             self.parent.resolve(self, value)
@@ -573,6 +674,26 @@ class CodeBuffer :
                 "ovr" : ("overlay", True),
             }
 
+        def _process_attrs(self, attrs, assign) :
+            if attrs != None :
+                if not self.parent.rel :
+                    raise AssertionError("psect attributes only allowed in relocatable CodeBuffer")
+                #end if
+                for attr in attrs :
+                    if attr not in self.known_attrs :
+                        raise AssertionError("unrecognized psect attribute “%s”" % attr)
+                    #end if
+                    entry = attrs[attr]
+                    if assign :
+                        setattr(self, entry[0], entry[1])
+                    else :
+                        assert getattr(self, entry[0]) == entry[1], \
+                            "inconsistent value for %s psect attribute" % entry[0]
+                    #end if
+                #end for
+            #end if
+        #end _process_attrs
+
         def __init__(self, name, parent, attrs) :
             self.name = name
             self.origin = None # to begin with
@@ -582,29 +703,22 @@ class CodeBuffer :
             if parent.rel :
                 assert limitsym(name).decode() == name, "psect name out of symbol range"
                 self.mem = self.parent.Memory()
-                self.labelrefs = []
                 # defaults
                 self.origin = 0
                 self.data = False
                 self.gbl = False
                 self.rel = True
                 self.overlay = False
+                self.relocations = []
             else :
                 self.mem = self.parent.mem
                 self.rel = False
+                self.relocations = None
             #end if
-            if attrs != None :
-                if not parent.rel :
-                    raise AssertionError("psect attributes only allowed in relocatable CodeBuffer")
-                #end if
-                for attr in attrs :
-                    if attr not in self.known_attrs :
-                        raise AssertionError("unrecognized psect attribute “%s”" % attr)
-                    #end if
-                    entry = attrs[attr]
-                    setattr(self, entry[0], entry[1])
-                #end for
-            #end if
+            self._process_attrs(attrs, True)
+            parent.psects[name] = self
+            parent.psects_by_index.append(self)
+            self.index = len(parent.psects) # for reference in complex relocations
         #end __init__
 
         def setorigin(self, neworigin) :
@@ -648,11 +762,55 @@ class CodeBuffer :
             return self # for convenient chaining of calls
         #end setorigin
 
+        def dumpw(self, start = None, end = None) :
+            "generator which yields a sequence of (addr, value, reloc) triples for" \
+            " nonzero or relocated word values in order of increasing address over the" \
+            " specified range. start and end must be even."
+            assert self.parent.rel
+            raw = self.mem.dumpw(start, end)
+            relocs = iter(sorted(self.relocations, key = lambda r : r.offset))
+            endraw, endrelocs = False, False
+            curword, curreloc = None, None
+            while True :
+                if not endraw and curword == None :
+                    curword = next(raw, None)
+                    if curword != None :
+                        curaddr, curword = curword
+                    else :
+                        endraw = True
+                    #end if
+                #end if
+                if not endrelocs and curreloc == None :
+                    curreloc = next(relocs, None)
+                    if curreloc == None :
+                        endrelocs = True
+                    #end if
+                #end if
+                if curword != None :
+                    if curreloc != None and curreloc.offset == curaddr :
+                        yield curaddr, curword, curreloc
+                        curword, curreloc = None, None
+                    else :
+                        assert curreloc == None or curreloc.offset > curaddr
+                        yield curaddr, curword, None
+                        curword = None
+                    #end if
+                elif curreloc != None :
+                    assert curword == None or curaddr > curreloc.offset
+                    yield curreloc.offset, 0, curreloc
+                    curreloc = None
+                #end if
+                if endraw and endrelocs :
+                    break
+            #end while
+        #end dumpw
+
     #end PsectClass
 
     def __init__(self, rel) :
         self.labels = {}
         self.psects = {}
+        self.psects_by_index = []
         self.rel = rel
         if not rel :
             self.mem = self.Memory()
@@ -694,6 +852,15 @@ class CodeBuffer :
     def _fixup(self, label, addr, reftype) :
         # common internal routine for actually fixing up a label reference.
         assert label.value != None
+        assert reftype in \
+            (
+                (self.LabelClass.b16a, self.LabelClass.b16r)
+            +
+                (
+                    (self.LabelClass.w8, self.LabelClass.w6),
+                    (),
+                )[label.rel]
+            )
         if reftype == self.LabelClass.b16a :
           # 16-bit absolute byte reference
             self.dw(addr, label.value)
@@ -713,6 +880,29 @@ class CodeBuffer :
             assert offset >= 0 and offset < 64
             self.db(addr, self.eb(addr) & ~63 | offset)
         #end if
+        if label.rel :
+            Relocation = self.Relocation
+            relargs = {}
+            if label.extlabel :
+                reltype = Relocation.RELTYPE.INTERNAL
+            elif label.psect != self.curpsect :
+                assert label.psect != None
+                additive = label.value != 0
+                reltype = (Relocation.RELTYPE.PSECT, Relocation.RELTYPE.PSECT_ADDITIVE)[additive]
+                relargs["name"] = label.psect.name
+                if additive :
+                    relargs["constant"] = label.value
+                #end if
+            else :
+                reltype = Relocation.RELTYPE.GLOBAL # never Relocation.RELTYPE.GLOBAL_ADDITIVE?
+                relargs["name"] = label.name
+            #end if
+            relargs["psect"] = self.curpsect
+            relargs["offset"] = addr
+            relargs["reltype"] = reltype
+            relargs["displaced"] = reftype == self.LabelClass.b16r
+            label.psect.relocations.append(Relocation(**relargs))
+        #end if
     #end _fixup
 
     def refer(self, label, addr, reftype) :
@@ -720,25 +910,9 @@ class CodeBuffer :
         location, of the specified type. May be called any number of times
         before or after the label is resolved."""
         addr = self.follow(addr)
-        assert reftype in \
-            (
-                (self.LabelClass.b16a, self.LabelClass.b16r)
-            +
-                (
-                    (self.LabelClass.w8, self.LabelClass.w6),
-                    (),
-                )[label.extlabel]
-            )
-        if label.value == None or self.rel :
-            # if self.rel and (label.extlabel or label.psect != self.curpsect)  :
-            # need to do internal relocations as well
-            if self.rel :
-                # FIXME: need to distinguish labels that get relocated from those that don’t
-                self.curpsect.labelrefs.append((label, addr, reftype))
-            #end if
+        if label.value == None :
             label.refs.append((addr, reftype)) # for later resolution/relocation
-        #end if
-        if label.value != None :
+        else :
             # resolve straight away
             self._fixup(label, addr, reftype)
         #end if
@@ -784,12 +958,15 @@ class CodeBuffer :
     #end follow
 
     def psect(self, name, attrs = None) :
-        """sets the current program section to the one with the specified name,
-        creating it if it doesn't already exist."""
-        if name not in self.psects :
-            self.psects[name] = self.PsectClass(name, self, attrs)
+        "sets the current program section to the one with the specified name," \
+        " creating it if it doesn't already exist."
+        psect = self.psects.get(name)
+        if psect != None :
+            psect._process_attrs(attrs, False)
+        else :
+            psect = self.PsectClass(name, self, attrs)
         #end if
-        self.curpsect = self.psects[name]
+        self.curpsect = psect
         self.mem = self.curpsect.mem
         return self # for convenient chaining of calls
     #end psect
@@ -948,6 +1125,7 @@ class CodeBuffer :
     def dumpb(self, start = None, end = None) :
         """generator which yields a sequence of (addr, value) pairs for nonzero byte
         values in order of increasing address over the specified range."""
+        assert not self.rel
         return \
             self.mem.dumpb(start, end)
     #end dumpb
@@ -956,6 +1134,7 @@ class CodeBuffer :
         """generator which yields a sequence of (addr, value) pairs for nonzero word
         values in order of increasing address over the specified range. start and end
         must be even."""
+        assert not self.rel
         return \
             self.mem.dumpw(start, end)
     #end dumpw
@@ -1003,7 +1182,7 @@ def rad50(s) :
         #end if
     #end for
     return \
-        result
+        tuple(result)
 #end rad50
 
 def unrad50(n) :
@@ -1089,6 +1268,8 @@ def write_obj(format, buf, outname, modulename = None, vername = None) :
     " as an .OBJ file in either formatted-binary or variable-length-record" \
     " formats, depending on format, which must be an OBJFORMAT.xxx value."
 
+    Relocation = CodeBuffer.Relocation
+    ComplexOp = Relocation.ComplexOp
     out = None
     curgsd = []
     currld = []
@@ -1202,6 +1383,7 @@ def write_obj(format, buf, outname, modulename = None, vername = None) :
                           )
                     #end if
                 #end for
+                psect_reloc = None
             #end if
         #end for
         if buf.startaddr != None :
@@ -1217,70 +1399,125 @@ def write_obj(format, buf, outname, modulename = None, vername = None) :
     last_psect_name = None
     for psect in ((buf.curpsect,), buf.psects.values())[buf.rel] :
         psect_name = (abs_psect_name, psect.name)[buf.rel]
+        if buf.rel :
+            dumper = psect.dumpw()
+        else :
+            dumper = psect.mem.dumpw()
+        #end if
         nextaddr = None
         startaddr = None
         lasttxt = []
-        dumper = psect.mem.dumpb()
         while True :
-            try :
-                addr, value = next(dumper)
-            except StopIteration :
-                addr = None
-            #end try
-            if addr == None or addr != nextaddr or len(lasttxt) == 126 :
-                if len(lasttxt) != 0 :
-                    wrrec(struct.pack("<HH" + "B" * len(lasttxt), *([3, startaddr] + lasttxt))) # text record
-                    if buf.rel :
-                        # output any associated relocations
-                        for label, refaddr, reftype in psect.labelrefs :
-                            assert reftype in (buf.LabelClass.b16a, buf.LabelClass.b16r)
-                            if refaddr >= startaddr and refaddr < addr & ~1 :
-                                offset = psect.mem.ew(refaddr)
-                                if label.psect != psect :
-                                    addrld \
-                                      (
-                                            (
-                                                (
-                                                    (2, 4),
-                                                    (5, 6),
-                                                )[offset != 0][reftype == buf.LabelClass.b16r]
-                                            |
-                                                refaddr - startaddr << 8,
-                                            )
-                                        +
-                                            encodesym(label.name)
-                                        +
-                                            (
-                                                (),
-                                                (offset,),
-                                            )[offset != 0]
-                                      )
-                                else :
-                                    # internal relocation
-                                    # FIXME: need to distinguish labels that get relocated from those that don’t
-                                    addrld((1 | refaddr - startaddr << 8, label.value))
-                                #end if
-                            #end if
-                        #end for
-                    #end if
-                #end if
-                lasttxt = []
-            #end if
-            if addr == None :
-                break
-            if nextaddr != addr :
-              # output location counter definition for following text record(s)
-                if psect_name != last_psect_name :
-                    addrld((7,) + encodesym(psect_name) + (addr,))
-                    last_psect_name = psect_name
+            value = next(dumper, None)
+            if value != None :
+                if buf.rel :
+                    addr, value, reloc = value
                 else :
+                    addr, value = value
+                    reloc = None
+                #end if
+            else :
+                addr, reloc = None, None
+            #end if
+            if addr != None and psect_name != last_psect_name :
+                addrld((7,) + encodesym(psect_name) + (addr,))
+                flushrld()
+                last_psect_name = psect_name
+                nextaddr = addr
+                startaddr = addr
+            #end if
+            if addr == None or addr != nextaddr or len(lasttxt) == 63 :
+                assert len(lasttxt) == 0 or len(currld) != 0
+                if len(lasttxt) != 0 :
+                    wrrec(struct.pack("<HH" + "H" * len(lasttxt), *([3, startaddr] + lasttxt)))
+                      # text record
+                #end if
+                if addr != None and nextaddr != addr :
+                  # output location counter definition for following text record(s)
                     addrld((8, addr))
                 #end if
                 flushrld()
                 startaddr = addr
+                lasttxt = []
             #end if
+            if addr == None :
+                break
             lasttxt.append(value)
-            nextaddr = addr + 1
+            nextaddr = addr + 2
+            if reloc != None :
+                if reloc.reltype == Relocation.RELTYPE.INTERNAL :
+                    rldentry = ((1, 3)[reloc.displaced], reloc.constant)
+                elif reloc.reltype == Relocation.RELTYPE.GLOBAL :
+                    rldentry = ((2, 4)[reloc.displaced],) + encodesym(reloc.name)
+                elif reloc.reltype == Relocation.RELTYPE.GLOBAL_ADDITIVE :
+                    rldentry = ((5, 6)[reloc.displaced],) + encodesym(reloc.name) + (reloc.constant,)
+                elif reloc.reltype == Relocation.RELTYPE.PSECT :
+                    rldentry = ((10, 12)[reloc.displaced],) + encodesym(reloc.name)
+                elif reloc.reltype == Relocation.RELTYPE.PSECT_ADDITIVE :
+                    rldentry = ((13, 14)[reloc.displaced],) + encodesym(reloc.name) + (reloc.constant,)
+                elif reloc.reltype == Relocation.RELTYPE.COMPLEX :
+                    complops = []
+                      # collect contents of complex relocation entry
+                      # list of tuples, each (value, isword)
+                    for operand in reloc.operands :
+                        complops.append((operand.op.value, False))
+                        if operand.op == ComplexOp.OP.FETCH_GLOBAL :
+                            complops.append((n, True) for n in encodesym(operand.name))
+                        elif operand.op == ComplexOp.OP.FETCH_REL :
+                            complops.extend \
+                              (
+                                [(buf.psects[operand.name].index, False), (operand.constant, True)]
+                              )
+                        elif operand.op == ComplexOp.OP.FETCH_CONST :
+                            complops.append((operand.constant, True))
+                        else : # assume no further info for op
+                            pass
+                        #end if
+                    #end for
+                    complops.append \
+                      (
+                        (
+                            (ComplexOp.OP.STORE, ComplexOp.OP.STORE_DISP)[reloc.displaced].value,
+                            False
+                        )
+                      )
+                    # turn complex relocation entry into sequence of words
+                    # TBD no -- doesn’t have to be word-aligned!
+                    rldrest = []
+                    complops = iter(complops)
+                    partword = None
+                    while True :
+                        item = next(complops, None)
+                        if item == None :
+                            if partword != None :
+                                rldrest.append(partword) # high byte is zero
+                            #end if
+                            break
+                        #end if
+                        item, isword = item
+                        if isword :
+                            if partword != None :
+                                rldrest.append(partword | (item & 255) << 8)
+                                partword = item >> 8 & 255
+                            else :
+                                rldrest.append(item)
+                                # and partword stays None
+                            #end if
+                        else :
+                            if partword != None :
+                                rldrest.append(partword | item << 8)
+                                partword = None
+                            else :
+                                partword = item
+                            #end if
+                        #end if
+                    #end while
+                    rldentry = (15,) + tuple(rldrest)
+                else :
+                    raise AssertionError("unrecognized relocation type %s" % repr(reloc.reltype))
+                #end if
+                addrld((rldentry[0] | addr - startaddr + 4 << 8,) + rldentry[1:])
+            #end if reloc != None
         #end while
     #end for
     flushrld()
