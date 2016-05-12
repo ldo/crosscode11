@@ -1437,7 +1437,6 @@ def write_obj(format, buf, outname, modulename = None, vername = None) :
                 startaddr = addr
             #end if
             if addr == None or addr != nextaddr or len(lasttxt) == 63 :
-                assert len(lasttxt) == 0 or len(currld) != 0
                 if len(lasttxt) != 0 :
                     wrrec(struct.pack("<HH" + "H" * len(lasttxt), *([3, startaddr] + lasttxt)))
                       # text record
