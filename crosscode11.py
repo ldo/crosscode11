@@ -606,16 +606,10 @@ class CodeBuffer :
             self.globlabel = globlabel
             self.extlabel = extlabel
             self.weak = weak
+            self.rel = None # to begin with
             assert not globlabel or limitsym(name).decode() == name, \
                 "globlabel name out of symbol range"
         #end __init__
-
-        @property
-        def rel(self) :
-            "does this label require link-time relocation."
-            return \
-                self.extlabel or self.psect != None and self.psect.rel
-        #end rel
 
         def resolve(self, value = None) :
             self.parent.resolve(self, value)
@@ -786,22 +780,18 @@ class CodeBuffer :
                         endrelocs = True
                     #end if
                 #end if
-                if curword != None :
-                    if curreloc != None and curreloc.offset == curaddr :
-                        yield curaddr, curword, curreloc
-                        curword, curreloc = None, None
-                    else :
-                        assert curreloc == None or curreloc.offset > curaddr
-                        yield curaddr, curword, None
-                        curword = None
-                    #end if
-                elif curreloc != None :
-                    assert curword == None or curaddr > curreloc.offset
+                if curword == None and curreloc == None :
+                    break
+                if curword != None and (curreloc == None or curaddr < curreloc.offset) :
+                    yield curaddr, curword, None
+                    curword = None
+                elif curreloc != None and (curword == None or curreloc.offset < curaddr) :
                     yield curreloc.offset, 0, curreloc
                     curreloc = None
+                else : # curword != None and curreloc != None and curaddr = curreloc.offset :
+                    yield curaddr, curword, curreloc
+                    curword, curreloc = None, None
                 #end if
-                if endraw and endrelocs :
-                    break
             #end while
         #end dumpw
 
@@ -828,7 +818,7 @@ class CodeBuffer :
               (
                 name = name,
                 parent = self,
-                psect = (None, self.curpsect)[self.rel],
+                psect = None,
                 globlabel = globlabel,
                 extlabel = False,
                 weak = False,
@@ -851,51 +841,63 @@ class CodeBuffer :
         """declares a label which is not defined in this CodeBuffer, but
         needs to be resolved in a separate linking stage."""
         if name not in self.labels :
-            self.labels[name] = self.LabelClass(name, self, self.curpsect, True, True, weak)
+            label = self.LabelClass \
+              (
+                name = name,
+                parent = self,
+                psect = None,
+                globlabel = True,
+                extlabel = True,
+                weak = weak,
+              )
+            label.rel = True
+            self.labels[name] = label
         else :
             assert self.labels[name].globlabel and self.labels[name].extlabel, \
                 "inconsistent extlabel attributes"
         #end if
-        return self.labels[name]
+        return label
     #end extlabel
 
-    def _fixup(self, label, addr, reftype) :
+    def _fixup(self, label, psect, addr, reftype) :
         # common internal routine for actually fixing up a label reference.
-        assert label.value != None
+        assert label.value != None and label.rel != None
         assert reftype in \
             (
                 (self.LabelClass.b16a, self.LabelClass.b16r)
             +
                 (
                     (self.LabelClass.w8, self.LabelClass.w6),
+                      # NYI: probably want to be able to handle these with complex relocation
                     (),
                 )[label.rel]
             )
         if reftype == self.LabelClass.b16a :
           # 16-bit absolute byte reference
-            self.dw(addr, label.value)
+            psect.mem.dw(addr, label.value)
         elif reftype == self.LabelClass.b16r :
           # 16-bit signed relative byte reference
-            self.dw(addr, label.value - addr - 2)
+            psect.mem.dw(addr, label.value - addr - 2)
         elif reftype == self.LabelClass.w8 :
           # 8-bit signed relative word reference (branch instr)
             assert (label.value & 1) == 0 and (addr & 1) == 0
             offset = (label.value - addr - 2) // 2
             assert offset >= -128 and offset < 128
-            self.db(addr, offset & 255)
+            psect.mem.db(addr, offset & 255)
         elif reftype == self.LabelClass.w6 :
           # 6-bit negated word reference (sob instr)
             assert (label.value & 1) == 0 and (addr & 1) == 0
             offset = (addr + 2 - label.value) // 2
             assert offset >= 0 and offset < 64
-            self.db(addr, self.eb(addr) & ~63 | offset)
+            psect.mem.db(addr, psect.mem.eb(addr) & ~63 | offset)
         #end if
         if label.rel :
             Relocation = self.Relocation
             relargs = {}
             if label.extlabel :
-                reltype = Relocation.RELTYPE.INTERNAL
-            elif label.psect != self.curpsect :
+                reltype = Relocation.RELTYPE.GLOBAL # never Relocation.RELTYPE.GLOBAL_ADDITIVE?
+                relargs["name"] = label.name
+            elif label.psect != psect :
                 assert label.psect != None
                 additive = label.value != 0
                 reltype = (Relocation.RELTYPE.PSECT, Relocation.RELTYPE.PSECT_ADDITIVE)[additive]
@@ -904,14 +906,13 @@ class CodeBuffer :
                     relargs["constant"] = label.value
                 #end if
             else :
-                reltype = Relocation.RELTYPE.GLOBAL # never Relocation.RELTYPE.GLOBAL_ADDITIVE?
-                relargs["name"] = label.name
+                reltype = Relocation.RELTYPE.INTERNAL
             #end if
-            relargs["psect"] = self.curpsect
+            relargs["psect"] = psect
             relargs["offset"] = addr
             relargs["reltype"] = reltype
             relargs["displaced"] = reftype == self.LabelClass.b16r
-            label.psect.relocations.append(Relocation(**relargs))
+            psect.relocations.append(Relocation(**relargs))
         #end if
     #end _fixup
 
@@ -921,10 +922,10 @@ class CodeBuffer :
         before or after the label is resolved."""
         addr = self.follow(addr)
         if label.value == None :
-            label.refs.append((addr, reftype)) # for later resolution/relocation
+            label.refs.append((self.curpsect, addr, reftype)) # for later resolution/relocation
         else :
             # resolve straight away
-            self._fixup(label, addr, reftype)
+            self._fixup(label, self.curpsect, addr, reftype)
         #end if
         return self # for convenient chaining of calls
     #end refer
@@ -935,14 +936,17 @@ class CodeBuffer :
         assert label.value == None # not already resolved
         assert not label.extlabel, "external symbol not supposed to be defined here"
         if value == None :
+            label.psect = self.curpsect
             value = self.curpsect.origin
+            label.rel = self.curpsect.rel
         else :
             value = self.follow(value)
+            label.rel = False
         #end if
         assert value != None
         label.value = value
-        for addr, reftype in label.refs :
-            self._fixup(label, addr, reftype)
+        for psect, addr, reftype in label.refs :
+            self._fixup(label, psect, addr, reftype)
         #end for
         return self # for convenient chaining of calls
     #end resolve
@@ -1060,9 +1064,9 @@ class CodeBuffer :
 
     #begin i
         assert len(args) == opcode.nroperands, "wrong nr operands %d, expect %d" % (len(args), opcode.nroperands)
-        opnds = []
-        extra = []
-        refer = []
+        opnds = [] # operands for opcode
+        extra = [] # extra instruction words
+        refer = [] # references needing relocation--list of argument tuples for self.refer
         for arg in args :
             if isinstance(arg, o) :
                 opnds.append(arg)
@@ -1078,7 +1082,7 @@ class CodeBuffer :
                 extra.append(arg[1])
                 refer.append((arg[1], self.dot() + 2 * len(refer) + 2, self.LabelClass.b16a))
             elif isinstance(arg, (int, self.LabelClass)) :
-                if (opcode.genmask & 1 << len(opnds)) != 0 :
+                if opcode.genmask & 1 << len(opnds) != 0 :
                     opnds.append(o.PCo) # PC-relative addressing
                     if isinstance(arg, int) :
                         extra.append(arg - self.dot() + 2 * len(refer) - 4)
@@ -1111,7 +1115,7 @@ class CodeBuffer :
             self.w(place(word))
         #end for
         for thisrefer in refer :
-            if isinstance(thisrefer, self.LabelClass) :
+            if isinstance(thisrefer[0], self.LabelClass) :
                 self.refer(*thisrefer)
             #end if
         #end for
@@ -1120,7 +1124,7 @@ class CodeBuffer :
 
     def start(self, startaddr) :
         """sets the start-address of the program. This is purely informational
-        as far as ths CodeBuffer class is concerned."""
+        as far as the CodeBuffer class is concerned."""
         assert self.startaddr == None
         if self.rel :
             assert isinstance(startaddr, self.LabelClass), "relocatable start address must be a label"
@@ -1288,6 +1292,8 @@ def write_obj(format, buf, outname, modulename = None, vername = None) :
         # returns a tuple of 2 integers representing the radix-50 encoded
         # representation of name (truncated or blank-padded to 6 bytes
         # as appropriate).
+        # FIXME: should report errors for names that collide after
+        # case conversion and length truncation
         return \
             tuple(rad50(name.encode() + b"     "[:6 - len(name)]))[:2]
     #end encodesym
@@ -1359,7 +1365,18 @@ def write_obj(format, buf, outname, modulename = None, vername = None) :
         addgsd(vername, 6, 0, 0)
     #end if
     if buf.rel :
-        for psect in buf.psects.values() :
+        for label in buf.labels.values() :
+            if label.extlabel :
+                addgsd \
+                  (
+                    name = label.name,
+                    type = 4,
+                    flags = int(label.weak) << 0,
+                    value = 0
+                  )
+            #end if
+        #end for
+        for psect in buf.psects_by_index :
             if psect.maxaddr != None :
                 flags = 0
                 for \
@@ -1386,7 +1403,7 @@ def write_obj(format, buf, outname, modulename = None, vername = None) :
                             flags =
                                     int(label.weak) << 0
                                 |
-                                    int(not label.extlabel) << 3
+                                    1 << 3
                                 |
                                     int(psect.rel) << 5,
                             value = label.value
@@ -1407,7 +1424,7 @@ def write_obj(format, buf, outname, modulename = None, vername = None) :
     #end if
     endgsd()
     last_psect_name = None
-    for psect in ((buf.curpsect,), buf.psects.values())[buf.rel] :
+    for psect in ((buf.curpsect,), buf.psects_by_index)[buf.rel] :
         psect_name = (abs_psect_name, psect.name)[buf.rel]
         if buf.rel :
             dumper = psect.dumpw()
