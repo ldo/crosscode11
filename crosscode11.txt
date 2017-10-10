@@ -96,7 +96,6 @@ outputs a single character passed to it in R0::
     c.org(0o200)
     c.i(op.MOV, o.i + c.label("thestr"), o.R4)
     c.label("outnext").resolve()
-    c.label("done")
     c.i(op.MOV, o.R4i, o.R0)
     c.i(op.BEQ, c.label("done"))
     c.i(op.JSR, o.PC, c.label("ttyout"))
