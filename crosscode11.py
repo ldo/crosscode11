@@ -446,7 +446,6 @@ class CodeBuffer :
                     #end if
                 #end for
             #end for
-            raise StopIteration
         #end dumpb
 
         def dumpw(self, start = None, end = None) :
@@ -487,7 +486,7 @@ class CodeBuffer :
                     if lastaddr != None :
                         yield (lastaddr, lastvalue) # saved even byte had no odd byte
                     #end if
-                    raise StopIteration
+                    break
                 #end if
             #end while
         #end dumpw
